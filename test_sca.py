@@ -21,7 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 from pymock import PyMockTestCase
 
-from ..sca import PhpSCA, Scope, CodeSyntaxError
+from sca import PhpSCA, Scope, CodeSyntaxError
 
 class TestPHPSCA(PyMockTestCase):
     '''
@@ -276,6 +276,45 @@ class TestPHPSCA(PyMockTestCase):
         ?>'''
         inccall = PhpSCA(code).get_func_calls()[0]
         self.assertTrue('FILE_INCLUDE' in inccall.vulntypes)
+    
+    def test_function(self):
+        code = '''
+        <?php
+        $outside = $_GET[1];
+        
+        function test($var1, $var2, $var3 = 'foo') {
+            echo $_GET['var'];
+            $a = $var2;
+            $b = $a;
+            if ($spam == $eggs) {
+                system($b);
+            }
+            echo $var3;
+            echo $outside;
+            $inside = $_GET[1];
+        }  
+        function dead_code($var1, $var2) {
+            echo $_GET[1];
+        }
+        
+        test('foo', $outside, $_GET[1]);
+        test($_GET[1], 'param2', 'param3');
+        echo $inside;
+        ?>'''
+        analyzer = PhpSCA(code)
+        echo1, sys1, echo2, echo3, echo4, test1, test2, echo5 = analyzer.get_func_calls()
+        # function test
+        self.assertTrue('XSS' in echo1.vulntypes)
+        self.assertFalse('OS_COMMANDING' in sys1.vulntypes)
+        self.assertFalse(0, len(echo2.vulntypes))
+        self.assertFalse(0, len(echo3.vulntypes))
+        # function test calls
+        self.assertTrue('OS_COMMANDING' and 'XSS' in test1.vulntypes)
+        self.assertEquals(0, len(test2.vulntypes))
+        # function dead
+        self.assertEquals(0, len(echo4.vulntypes))
+        # outside
+        self.assertEquals(0, len(echo5.vulntypes))
         
     def test_syntax_error(self):
         invalidcode = '''
