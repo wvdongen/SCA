@@ -106,6 +106,14 @@ class PhpSCA(object):
         self._functionsDec = {}
         # For debugging purpose
         self.debugmode = False
+        # class node to create new instances
+        self._classes = {}
+        # variableDefs that are objects
+        self._objects = {}
+        
+    def get_functionDec(self):
+        self._start()
+        return self._functionsDec
     
     def _start(self):
         '''
@@ -134,9 +142,11 @@ class PhpSCA(object):
         self._start()
         resdict = {}
         for f in self.get_func_calls(vuln=True):
-            for vulnty in f.vulntypes:
+            for trace in f._vulntraces:
+            #for vulnty in f.vulntypes:
+                vulnty = trace[0]
                 flist = resdict.setdefault(vulnty, [])
-                flist.append(f)
+                flist.append(trace[1:])
         return resdict
     
     def get_vars(self, usr_controlled=False):
@@ -147,14 +157,18 @@ class PhpSCA(object):
         
         return all_vars
     
+    def get_objects(self):
+        self._start()
+        return self._objects
+    
     def get_func_calls(self, vuln=False):
         self._start()
-        filter_vuln = (lambda f: len(f.vulntypes)) if vuln \
+        filter_vuln = (lambda f: len(f._vulntraces)) if vuln \
                         else (lambda f: True)
-        return filter(filter_vuln, self._functions)
+        funcs = filter(filter_vuln, self._functions)
+        return funcs
     
     def _visitor(self, node):
-        
         '''
         Visitor method for AST traversal. Used as arg for AST nodes' 'accept'
         method (Visitor Design Pattern)
@@ -171,52 +185,77 @@ class PhpSCA(object):
         stoponthis = False
         newobj = None
         
-        # Create FuncCall nodes. 
-        # PHP special functions: echo, print, include, require
-        if nodety in (phpast.FunctionCall, phpast.Echo, phpast.Print,
-                      phpast.Include, phpast.Require):
+        
+        if nodety is phpast.MethodCall:
+            '''
+            node: MethodCall(Variable('$obj'), 'body', [Parameter(Variable('$hoi'), False)])
+            node.node: Variable('$obj')
+            '''
+            # Create funccall (parses the params)
             name = getattr(node, 'name', node.__class__.__name__.lower())
             newobj = FuncCall(name, node.lineno, node, locatescope())
+                        
+            # Set method scope as active code
+            var_object = self._objects[node.node.name]
+            method_scope = var_object._obj_def.get_method(node.name)._scope
+            method_scope._dead_code = False
             
-            # FunctionCalls
-            if nodety is phpast.FunctionCall and node.name in self._functionsDec:
-                    
-                functionNode = self._functionsDec[node.name]
-                scope = functionNode._scope
-
-                if scope._dead_code is True:
-                    
-                    # Put params in temp list to easily get index
-                    temp_params = [param.name for param in functionNode.params]
-                    
-                    search = '|'.join(temp_params).replace('$', '\$')
-                    
-                    # Loop through all vars used as parameter in this scope
-                    for var in scope.get_var_like('__$temp_anon_var$_'):   
-                        root_var = var.get_root_var()
-                        # directe call with param var or var with param as root 
-                        if re.search(r"(%s)__\$temp_anon_var\$_.*"%search, root_var.name) or root_var._formal_parameter ==  True:
-                            tainted_call =  var._parent_obj._parent_obj._ast_node
-                            tainted_call_name = getattr(tainted_call, 'name', tainted_call.__class__.__name__.lower())
-                            # Loop through PVFDB, check if functioncall is present
-                            for vul, pvf in FuncCall.PVFDB.items():
-                                for pvfname, info in pvf.items():
-                                    if pvfname == tainted_call_name:
-                                        # Add this function to PVFDB
-                                        # Store vulnerable param index 
-                                        param_index = temp_params.index(root_var.name)
-                                        if functionNode.name not in FuncCall.PVFDB[vul]: 
-                                            FuncCall.PVFDB[vul][functionNode.name] = [param_index]
-                                        else:
-                                            FuncCall.PVFDB[vul][functionNode.name].append(param_index)
-                    
-                    # This is no longer dead code, no further lookups necessary  
-                    scope._dead_code = False
-
-            self._functions.append(newobj)
-            # Stop parsing children nodes
+            # Evaluate if vulnerable (this state will be overridden upon new method call of the same instance)
+            for funccall in method_scope.get_functions():
+                vulntype = funccall.vulntypes
+                if vulntype: 
+                    funccall.add_vulntrace(vulntype)
+            
             stoponthis = True
         
+        # Custom function call
+        if nodety is phpast.FunctionCall and node.name in self._functionsDec:
+            
+            # Link functionCall to custom function
+            functionObj = self._functionsDec[node.name]
+            node._function = functionObj
+            
+            # Create funccall (parses the params of funccall)
+            name = getattr(node, 'name', node.__class__.__name__.lower())
+            newobj = FuncCall(name, node.lineno, node, locatescope())
+
+            # Set function scope as active code
+            functionObj._scope._dead_code = False
+            
+            # Evaluate if vulnerable (this state will be overridden upon new function call)
+            for funccall in functionObj._scope.get_functions():
+                vulntype = funccall.vulntypes
+                if vulntype:
+                    funccall.add_vulntrace(vulntype)
+            
+            stoponthis = True
+        
+        # Create FuncCall nodes. 
+        # PHP special functions: echo, print, include, require
+        if nodety in (phpast.FunctionCall, phpast.Echo, phpast.Print, 
+                      phpast.Include, phpast.Require):
+
+            currentscope = locatescope()
+            name = getattr(node, 'name', node.__class__.__name__.lower())
+            
+            # Don't process custom functions until function call
+            if name not in self._functionsDec:
+                
+                # new function call
+                newobj = FuncCall(name, node.lineno, node, currentscope)
+                self._functions.append(newobj)
+                
+                # Evaluate if vulnerable, if true add trace
+                vulntype = newobj.vulntypes                
+                if vulntype:
+                    newobj.add_vulntrace(vulntype)                
+                                
+                # add function to root scope.
+                currentscope.get_root_scope().add_function(newobj)
+                
+                # Stop parsing children nodes
+                stoponthis = True
+    
         # Create the VariableDef
         elif nodety is phpast.Assignment:
             '''
@@ -224,12 +263,56 @@ class PhpSCA(object):
             node:      Assignment(Variable('$ok'), ArrayOffset(Variable('$_GET'), 'a'), False)
             node.node: Variable('$ok')
             node.expr: ArrayOffset(Variable('$_GET'), 'a')
-            '''            
+            
+            $this->prop = 'property' (in method)
+            node: Assignment(ObjectProperty(Variable('$this'), 'prop'), 'property', False)
+            node.node: ObjectProperty(Variable('$this'), 'prop')
+            node.expr: Variable('$prop')
+            
+            private $prop = 'property'
+            node: ClassVariables(['private'], [ClassVariable('$prop', 'property')])
+            '''
+            
             currscope = locatescope()
             varnode = node.node
-            newobj = VariableDef(varnode.name, varnode.lineno,
-                                 currscope, ast_node=node.expr)
+            var_name = varnode.name
+            
+            # Store object properties (vars, class variables) as $this->property
+            # otherwise $a->var and $b->var overwrite each other (both stored as $var).
+            if type(node.node) is phpast.ObjectProperty:
+                var_name = node.node.node.name + '->' + varnode.name
+
+            # Create var
+            newobj = VariableDef(var_name, varnode.lineno, currscope, ast_node=node.expr)
+                            
+            # Add var to scope
             currscope.add_var(newobj)
+            
+            # If object property also add var to parent scope
+            if type(node.node) is phpast.ObjectProperty:
+                root_scope = currscope.get_root_scope()._parent_scope
+                if not root_scope.get_var(var_name): 
+                    # create object var 
+                    property = VariableDef(var_name, varnode.lineno, currscope, ast_node=node.expr)
+                    property.parent = newobj
+                    root_scope.add_var(property)
+
+            # Overwrite object property
+            if type(node.node) is phpast.ObjectProperty:
+                # link this var to object property
+                root_scope = currscope.get_root_scope()
+                if type(root_scope._ast_node) is phpast.Method:
+                    # link this var to property
+                    root_scope._parent_scope.get_var(var_name).parent = newobj
+            
+            # Object creation
+            if type(node.expr) is phpast.New and node.expr.name in self._classes:
+                # Start ast travel class Node
+                class_node = self._classes[node.expr.name]
+                class_node._object = True
+                class_node._object_var = newobj # pass this var to object
+                class_node.accept(self._visitor)
+                
             # Stop parsing children nodes
             stoponthis = True
         
@@ -242,6 +325,66 @@ class PhpSCA(object):
             # Create new Scope and push it onto the stack
             newscope = Scope(node, parent_scope=parentscope)
             self._scopes.append(newscope)
+        
+        elif nodety is phpast.Class:
+            # global parent scope
+            parentscope = locatescope()
+            
+            if not getattr(node, '_object', False):
+                # Start traveling node when instance is created
+                node._parent_scope = parentscope
+                self._classes[node.name] = node
+                stoponthis = True
+            else:
+                # new instance has been created
+                # Create new Scope and push it onto the stack
+                newscope = Scope(node, parent_scope=parentscope, is_root=True)
+                
+                # add builtins to scope
+                newscope._builtins = dict(
+                        ((uv, VariableDef(uv, -1, newscope)) for uv in VariableDef.USER_VARS))
+                
+                self._scopes.append(newscope)
+                
+                newobj = Obj(node.name, node.lineno, newscope, node._object_var, ast_node=node)
+                
+                # add ObjDef to VarDef, this way we can trace method call back to the correct instance
+                node._object_var._obj_def = newobj            
+                
+                node._scope = newscope
+                self._objects[node._object_var.name] = node._object_var
+            
+        elif nodety is phpast.Method:       
+            parentscope = locatescope()  
+            # Create new Scope and push it onto the stack
+            newscope = Scope(node, parent_scope=parentscope, is_root=True)
+            # add builtins to scope
+            newscope._builtins = dict(
+                    ((uv, VariableDef(uv, -1, newscope)) for uv in VariableDef.USER_VARS))            
+            # Don't trigger vulnerabilities in this scope untill code is no longer dead
+            newscope._dead_code = True
+            
+            self._scopes.append(newscope)
+            
+            newobj = Method(node.name, node.lineno, newscope, ast_node=node)
+            
+            node._scope = newscope
+            
+            # add this method to object
+            node._parent_node._object_var._obj_def.add_method(newobj)
+        
+        elif nodety is phpast.ClassVariables:
+            '''
+            Node: ClassVariables(['private'], [ClassVariable('$prop', 'property')])
+            node.modifiers: ['private']
+            node.nodes[0]: ClassVariable('$prop', 'property')
+            '''
+            currscope = locatescope()
+            variable = node.nodes[0]
+            # set var name to $this->property
+            name = '$this->' + variable.name[1:]
+            newobj = VariableDef(name, node.lineno, currscope, ast_node = variable)
+            currscope.add_var(newobj)
         
         elif nodety is phpast.Function:
             '''
@@ -265,13 +408,28 @@ class PhpSCA(object):
             self._scopes.append(newscope)
             
             node._scope = newscope
-            self._functionsDec[node.name] = node 
+           
+            # create Function object
+            newobj = Function(node.name, node.lineno, newscope, ast_node=node)
+            
+            # Store custom function
+            self._functionsDec[node.name] = newobj         
+
         
         elif nodety is phpast.FormalParameter:
             currscope = locatescope()
             newobj = VariableDef(node.name, node.lineno, currscope, ast_node = node)
-            newobj._formal_parameter = True
             currscope.add_var(newobj)
+            
+            # If method add
+            if type(node._parent_node) is phpast.Method:
+                method_name = node._parent_node.name
+                object_var = node._parent_node._parent_node._object_var
+                object_var._obj_def.get_method(method_name).add_formal_param(newobj)
+            # Function
+            elif type(node._parent_node) is phpast.Function:
+                function_name = node._parent_node.name
+                self._functionsDec[function_name].add_formal_param(newobj)
         
         # Debug it?
         if self.debugmode and newobj:
@@ -360,9 +518,11 @@ class VariableDef(NodeRep):
         self._is_root = True if (name in VariableDef.USER_VARS) else None 
         # Request parameter name, source for a possible vuln.
         self._taint_source = None
-        # Is var a formal parameter of function?
-        self._formal_parameter = False
-
+        # Is object property?
+        self._object_property = False
+        # Anon var? (param var in functioncall).
+        self._anon_var = False
+        
     @property
     def is_root(self):
         '''
@@ -403,8 +563,8 @@ class VariableDef(NodeRep):
         '''
         Returns bool that indicates if this variable is tainted.
         '''
-        cbusr = self._controlled_by_user
-        
+        #cbusr = self._controlled_by_user
+        cbusr = None # no cache
         if cbusr is None:
             if self.is_root:
                 if self._name in VariableDef.USER_VARS:
@@ -449,10 +609,10 @@ class VariableDef(NodeRep):
         return hash(self._name)
     
     def __repr__(self):
-        return "<Var definition at line %s>" % self.lineno
+        return "<Var %s definition at line %s>" % (self.name, self.lineno)
     
     def __str__(self):
-        return ("Line  %(lineno)s. Declaration of variable '%(name)s'."
+        return ("Line %(lineno)s. Declaration of variable '%(name)s'."
             " Status: %(status)s") % \
             {'name': self.name,
              'lineno': self.lineno,
@@ -506,6 +666,68 @@ class VariableDef(NodeRep):
                         self._safe_for.append(vulnty)
                 return n
         return None
+    
+    def set_clean(self):
+        self._controlled_by_user = None
+        self._taint_source = None
+        self._is_root = True        
+
+class Obj(NodeRep):
+    
+    def __init__(self, name, lineno, scope, object_var, ast_node=None):
+        
+        NodeRep.__init__(self, name, lineno, ast_node=ast_node)
+        
+        self._scope = scope
+        self._object_var = object_var
+        self._methods = {}
+        
+    def add_method(self, method):
+        self._methods[method.name] = method
+    
+    def get_method(self, name):
+        return self._methods[name]
+
+    def __repr__(self):
+        return "<Class definition '%s' at line %s>" % (self.name, self.lineno)
+    
+    def __str__(self):
+        return "Line %s. declaration of Class '%s'" % (self.lineno, self.name)
+
+
+class Method(NodeRep):
+    def __init__(self, name, lineno, scope, ast_node=None):
+        NodeRep.__init__(self, name, lineno, ast_node=ast_node)
+        
+        self._scope = scope
+        self._formal_params = []
+
+    def add_formal_param(self, var):
+        self._formal_params.append(var)
+
+    def get_formal_param(self, index):
+        return self._formal_params[index]
+    
+    def get_formal_params(self):
+        return self._formal_params      
+
+
+class Function(NodeRep):
+    def __init__(self, name, lineno, scope, ast_node=None):
+        NodeRep.__init__(self, name, lineno, ast_node=ast_node)
+        
+        self._scope = scope
+        self._formal_params = []
+
+    def add_formal_param(self, var):
+        self._formal_params.append(var)
+
+    def get_formal_param(self, index):
+        return self._formal_params[index]
+    
+    def get_formal_params(self):
+        return self._formal_params  
+
 
 class FuncCall(NodeRep):
     '''
@@ -515,17 +737,17 @@ class FuncCall(NodeRep):
     # Potentially Vulnerable Functions Database
     PVFDB = {
         'OS_COMMANDING':
-            {'system':'', 'exec':'', 'shell_exec':''},
+            ('system', 'exec', 'shell_exec'),
         'XSS':
-            {'echo':'', 'print':'', 'printf':'', 'header':''},
+            ('echo', 'print', 'printf', 'header'),
         'FILE_INCLUDE':
-            {'include':'', 'require':''},
+            ('include', 'require'),
         'FILE_DISCLOSURE':
-            {'file_get_contents':'', 'file':'', 'fread':'', 'finfo_file':''},
+            ('file_get_contents', 'file', 'fread', 'finfo_file'),
         }
     # Securing Functions Database
     SFDB = {
-        'OS_COMMANDING': 
+        'OS_COMMANDING':
             ('escapeshellarg', 'escapeshellcmd'),
         'XSS':
             ('htmlentities', 'htmlspecialchars'),
@@ -540,38 +762,46 @@ class FuncCall(NodeRep):
         self._params = self._parse_params()
         self._vulntypes = None
         self._vulnsources = None
+        # Funccall can be called multiple times (in custom function or method)
+        self._vulntraces = []
     
+    def get_vulntraces(self):
+        return self._vulntraces
+    
+    def add_vulntrace(self, vulntype):
+        trace = [vulntype[0]]
+        trace.append(self)
+        for p in self._params:
+            if p.var and p.var.taint_source:
+                # Add param to trace
+                var = p.var
+                trace.append('Param ' + str(p.get_index()))
+                # Add all vars to trace
+                while var.parent.taint_source:
+                    trace.append(var.parent)
+                    var = var.parent
+        self._vulntraces.append(trace)
+        
     @property
     def vulntypes(self):
-        vulntys = self._vulntypes
+        self._vulntypes = []
+
+        # Defaults to no vulns.
+        self._vulntypes = vulntys = []
         
-        if type(vulntys) is list:
-            return vulntys
-        else:
-            # Defaults to no vulns.
-            self._vulntypes = vulntys = []
-            
-            possvulntypes = FuncCall.get_vulnty_for(self._name)
-
-            for possvulnty in possvulntypes:
-                for v in (p.var for p in self._params if p.var):
-                    if v.controlled_by_user and v.is_tainted_for(possvulnty):
-                        # if list we need to check params
-                        if type(FuncCall.PVFDB[possvulnty][self.name]) == list:                   
-                            root_scope = v._scope.get_root_scope()
-                            param_index = v._parent_obj.get_index()
-                            if param_index in FuncCall.PVFDB[possvulnty][self.name]:
-                                vulntys.append(possvulnty)
-                        else:
-                            root_scope = v._scope.get_root_scope()
-                            if root_scope._dead_code == False:
-                                vulntys.append(possvulnty)
-
-                
+        possvulnty = FuncCall.get_vulnty_for(self.name)            
+        if possvulnty:
+            for v in (p.var for p in self._params if p.var):
+                if v.controlled_by_user and v.is_tainted_for(possvulnty):
+                    root_scope = v._scope.get_root_scope()
+                    if root_scope._dead_code == False:
+                        vulntys.append(possvulnty)
+                                         
         return vulntys
     
     @property
     def vulnsources(self):
+        self._vulnsources = None # no cache
         vulnsrcs = self._vulnsources
         if type(vulnsrcs) is list:
             return vulnsrcs
@@ -587,18 +817,26 @@ class FuncCall(NodeRep):
     def params(self):
         return self._params
     
+    def get_class(self):
+        if type(self.ast_node) is not phpast.MethodCall:
+            return None
+        var_name = self.ast_node.node.name
+        var = self._scope.get_var(var_name)
+        class_name = var.ast_node.name
+        return class_name
+    
     @staticmethod
     def get_vulnty_for(fname):
         '''
-        Return the vuln types for the given function name `fname`.
+        Return the vuln type for the given function name `fname`. Return None
+        if no vuln type is associated.
         
         @param fname: Function name
         '''
-        vulntypes = []
         for vulnty, pvfnames in FuncCall.PVFDB.iteritems():
             if any(fname == pvfn for pvfn in pvfnames):
-                vulntypes.append(vulnty)
-        return vulntypes
+                return vulnty
+        return None
     
     @staticmethod
     def get_vulnty_for_sec(sfname):
@@ -623,7 +861,7 @@ class FuncCall(NodeRep):
     def _parse_params(self):
         def attrname(node):
             nodety = type(node)
-            if nodety == phpast.FunctionCall:
+            if nodety in (phpast.FunctionCall, phpast.MethodCall):
                 name = 'params'
             elif nodety == phpast.Echo:
                 name = 'nodes'
@@ -636,16 +874,52 @@ class FuncCall(NodeRep):
             return name
             
         params = []
-        astnode = self._ast_node
-        nodeparams = getattr(astnode, attrname(astnode), [])
+        ast_node = self._ast_node
+        nodeparams = getattr(ast_node, attrname(ast_node), [])
+
+        # Set al formal params to clean state
+        # Custom function
+        if type(ast_node) is phpast.FunctionCall and getattr(ast_node, '_function', None):
+            functionObj = ast_node._function
+            for param_var in functionObj.get_formal_params():
+                param_var.set_clean()
+        
+        # Method
+        elif type(ast_node) is phpast.MethodCall:
+            # get object name (for example $obj1)
+            object_name = self._ast_node.node.name
+            # get object var
+            object_var = self._scope.get_var(object_name)
+            method_name = self.name            
+            method_node = object_var._obj_def.get_method(method_name)
+            for param_var in method_node.get_formal_params():
+                param_var.set_clean
         
         if nodeparams and type(nodeparams) is not list:
             nodeparams = [nodeparams]
         
-        for par in nodeparams:
+        # Create params
+        for par_index, par in enumerate(nodeparams):
             # All nodes should have parents?
-            par._parent_node = astnode
-            params.append(Param(par, self._scope, self))
+            par._parent_node = ast_node
+            param = Param(par, self._scope, self)
+            params.append(param)
+            
+            # links params to formal params
+            # Methods call
+            if type(ast_node) is phpast.MethodCall and param.var:
+                formal_param = method_node.get_formal_param(par_index)
+                formal_param._controlled_by_user = None
+                formal_param.is_root = False
+                formal_param.parent = param.var
+            
+            # Custom function calls
+            elif type(ast_node) is phpast.FunctionCall and param.var and getattr(ast_node, '_function', None):
+                formal_param = functionObj.get_formal_param(par_index)
+                formal_param._controlled_by_user = None
+                formal_param.is_root = False
+                formal_param.parent = param.var
+          
         return params
 
 
@@ -664,6 +938,16 @@ class Scope(object):
         self._vars = {}
         self._is_root = is_root
         self._dead_code = False
+        self._functions = []
+    
+    def add_function(self, function):
+        if function is None:
+            raise ValueError, "Invalid value for parameter 'function': None"
+        self._functions.append(function)
+        
+    def get_functions(self):
+        return self._functions
+           
         
     def get_root_scope(self):
         while self._is_root == False:
@@ -671,8 +955,13 @@ class Scope(object):
         return self
         
     def add_var(self, newvar):
+
         if newvar is None:
             raise ValueError, "Invalid value for parameter 'var': None"
+        
+        # No need to store anon vars
+        if newvar._anon_var is True:
+            return        
         
         selfvars = self._vars
         newvarname = newvar.name
@@ -680,11 +969,11 @@ class Scope(object):
         if not varobj or newvar > varobj:
             selfvars[newvarname] = newvar
             
-            # don't add var to parent if function
-            if type(self._ast_node) is phpast.Function:
+            # don't add var to parent if scope is function or method
+            if self._is_root:
                 return
             
-            # Now let the parent scope do his thing                        
+            # Now let the parent scope do his thing        
             if self._parent_scope:
                 self._parent_scope.add_var(newvar)
     
@@ -704,15 +993,15 @@ class Scope(object):
         var = self._vars.get(varname, None) or self._builtins.get(varname)
         
         # Don't look in parent node for var
-        if type(self._ast_node) is phpast.Function:
+        if self._is_root and type(self._ast_node) is not phpast.Method:
             return var
         
-        # look in parent node
+        # look in parent parent scope
         if not var and self._parent_scope:
             var = self._parent_scope.get_var(varname)
-            
+        
         return var
-    
+
     def get_all_vars(self):
         return self._vars.values()
     
@@ -740,16 +1029,25 @@ class Param(object):
         
         for node in NodeRep.parse(node):
             
-            if type(node) is phpast.Variable:        
+            if type(node) is phpast.Variable:
+                
+                # object properties are stored as $this->property
                 varname = node.name
-                scopevar = scope.get_var(varname)
-                scope.get_var_like(varname + '__$temp_anon_var$_')
-                vardef_nr = str(len(scope.get_var_like(varname + '__$temp_anon_var$_')))
-                vardef = VariableDef(varname + '__$temp_anon_var$_' + vardef_nr, node.lineno, scope)
+                if type(node._parent_node) is phpast.ObjectProperty:
+                    varname = node._parent_node.node.name + '->' + node._parent_node.name 
+                
+                vardef = VariableDef(varname + '__$temp_anon_var$_', node.lineno, scope)
                 vardef.var_node = node
+                # add type
+                vardef._anon_var = True
+                # get and set parent
+                scopevar = scope.get_var(varname)
                 vardef.parent = scopevar
+                # add Param to VarDef
                 vardef._parent_obj = self
+                # add var to current scope
                 scope.add_var(vardef)
+                
                 break
             
             elif type(node) is phpast.FunctionCall:
@@ -764,5 +1062,5 @@ class Param(object):
                 if vulnty:
                     vardef._safe_for.append(vulnty)
                 break
-        
+
         return vardef

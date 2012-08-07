@@ -284,6 +284,8 @@ class TestPHPSCA(PyMockTestCase):
         
         function test($var1, $var2, $var3 = 'foo') {
             echo $_GET['var'];
+            echo $var1;
+            
             $a = $var2;
             $b = $a;
             if ($spam == $eggs) {
@@ -296,25 +298,106 @@ class TestPHPSCA(PyMockTestCase):
         function dead_code($var1, $var2) {
             echo $_GET[1];
         }
-        
-        test('foo', $outside, $_GET[1]);
-        test($_GET[1], 'param2', 'param3');
+        $foo = $_POST['something'];
+        test($foo, $outside, $_GET[1]);
+        test($_GET[1], 'param2');
         echo $inside;
         ?>'''
         analyzer = PhpSCA(code)
-        echo1, sys1, echo2, echo3, echo4, test1, test2, echo5 = analyzer.get_func_calls()
-        # function test
-        self.assertTrue('XSS' in echo1.vulntypes)
-        self.assertFalse('OS_COMMANDING' in sys1.vulntypes)
-        self.assertFalse(0, len(echo2.vulntypes))
-        self.assertFalse(0, len(echo3.vulntypes))
-        # function test calls
-        self.assertTrue('OS_COMMANDING' and 'XSS' in test1.vulntypes)
-        self.assertEquals(0, len(test2.vulntypes))
-        # function dead
-        self.assertEquals(0, len(echo4.vulntypes))
-        # outside
-        self.assertEquals(0, len(echo5.vulntypes))
+        
+        vulns = analyzer.get_vulns()
+        self.assertEquals(5, len(vulns['XSS']))
+        self.assertEquals(1, len(vulns['OS_COMMANDING']))
+        
+        echo_GET, echo_var1, sys_b, echo_var3, echo_outside, echo_dead_var1, echo_inside = analyzer.get_func_calls()
+        
+        # Function test
+        
+        # Direct $_GET - 2 vulnerabilities
+        self.assertEquals(2, len(echo_GET._vulntraces))    
+        self.assertEquals('XSS', echo_GET._vulntraces[0][0]) #first function call
+        self.assertEquals('XSS', echo_GET._vulntraces[1][0]) #second function call
+        self.assertTrue('XSS' in echo_GET.vulntypes) # Last traveled call (that is the second function call)      
+        
+        # echo $var1 - 2 vulnerabilities with trace
+        self.assertEquals(2, len(echo_var1._vulntraces))
+        self.assertEquals('XSS', echo_var1._vulntraces[0][0])
+        self.assertEquals('$foo', echo_var1._vulntraces[0][-1].name)
+        self.assertEquals(21, echo_var1._vulntraces[0][-1].lineno)
+        self.assertEquals('XSS', echo_var1._vulntraces[1][0])
+        self.assertEquals('$_GET__$temp_anon_var$_', echo_var1._vulntraces[1][-1].name)
+        self.assertEquals(23, echo_var1._vulntraces[1][-1].lineno)
+        
+        # system call - 1 trace
+        self.assertEquals(1, len(sys_b._vulntraces))
+        self.assertEquals('OS_COMMANDING', sys_b._vulntraces[0][0])
+        self.assertEquals('$outside', sys_b._vulntraces[0][-1].name)
+        self.assertEquals(3, sys_b._vulntraces[0][-1].lineno)
+        
+        # echo var3 - 1 trace
+        self.assertTrue(1, len(echo_var3._vulntraces))
+        self.assertTrue('XSS', echo_var3._vulntraces[0][0])
+        self.assertTrue('$_GET__$temp_anon_var$_', echo_var3._vulntraces[0][-1].name)
+        self.assertTrue(22, echo_var3._vulntraces[0][-1].lineno)
+        
+        # echo $outside - outside scope, not vulnerable
+        self.assertEquals(0, len(echo_outside._vulntraces))
+        
+        # Function dead - Scope is inactive (dead code), no vulnerabilities
+        self.assertTrue(analyzer.get_functionDec()['dead_code']._scope._dead_code)
+        self.assertEquals(0, len(echo_dead_var1._vulntraces))
+        
+        # Inside var - function scope test
+        self.assertEquals(0, len(echo_inside._vulntraces))
+    
+    def test_classes(self):
+        code = '''
+        <?php
+        class A {
+            private $prop1 = 'ok';
+            
+            function foo($var1) {
+                echo $_GET['eye'];
+                $this->prop1 = $var1;
+            }
+            
+            function bar($prop2 = 'default') {
+                echo $this->prop1;
+                $this->prop2 = $prop2;
+            }
+            
+            function baz() {
+                if (1) {
+                    system($this->prop2);
+                }
+            }
+        }
+        
+        $obj1 = new A();
+        $obj1->foo($_GET[1]); #XSS
+        $obj1->bar(); #XSS
+        $obj1->baz();
+        
+        $awsome = $_POST[1];
+        $obj2 = new A();
+        $obj2->foo('test'); #XSS
+        $obj2->bar($awsome);
+        $obj2->baz(); #OS COMMANDING
+        
+        $obj1->bar(); #XSS again
+        ?>'''
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns()
+        
+        self.assertEquals(4, len(vulns['XSS']))
+        self.assertEquals(1, len(vulns['OS_COMMANDING']))
+        
+        self.assertEquals(18, vulns['OS_COMMANDING'][0][0].lineno)
+        self.assertEquals('$awsome', vulns['OS_COMMANDING'][0][-1].name)
+        self.assertEquals(28, vulns['OS_COMMANDING'][0][-1].lineno)
+        
+        objects = analyzer.get_objects();
+        self.assertTrue('$obj1' and '$obj2' in objects)
         
     def test_syntax_error(self):
         invalidcode = '''
