@@ -110,6 +110,8 @@ class PhpSCA(object):
         self._classes = {}
         # variableDefs that are objects
         self._objects = {}
+        # used for method traveling
+        self._methods_deep = []
         
     def get_functionDec(self):
         self._start()
@@ -185,27 +187,80 @@ class PhpSCA(object):
         stoponthis = False
         newobj = None
         
-        
         if nodety is phpast.MethodCall:
             '''
             node: MethodCall(Variable('$obj'), 'body', [Parameter(Variable('$hoi'), False)])
             node.node: Variable('$obj')
             '''
-            # Create funccall (parses the params)
-            name = getattr(node, 'name', node.__class__.__name__.lower())
-            newobj = FuncCall(name, node.lineno, node, locatescope())
+            currscope = locatescope()
+            method_name = getattr(node, 'name', node.__class__.__name__.lower())
+                        
+            # Get object
+            if node.node.name == '$this':
+                object = currscope.get_root_scope()._parent_scope.obj
+            else:    
+                object = self._objects[node.node.name]._obj_def
+            
+            method = object.get_method(method_name)
+            
+            # clean formal parms to avoid false positives
+            method.clean_formal_params()
+            
+            # keep track of the methos being traveled
+            self._methods_deep.append(method)
+            
+            # Start ast travel method Node
+            if method._parsed is False:
+                method._parsed = True
+                method._ast_node.accept(self._visitor)
+
+            # Create funccall (parses the params)            
+            newobj = FuncCall(method_name, node.lineno, node, currscope)
+            
+            # Add method object to call for easy reference
+            newobj._method = method
+            
+            # Keep track of what methods are called within this method
+            currscope.get_root_scope().add_method_call(newobj)
                         
             # Set method scope as active code
-            var_object = self._objects[node.node.name]
-            method_scope = var_object._obj_def.get_method(node.name)._scope
+            method_scope = object.get_method(method_name)._scope
             method_scope._dead_code = False
             
-            # Evaluate if vulnerable (this state will be overridden upon new method call of the same instance)
-            for funccall in method_scope.get_functions():
-                vulntype = funccall.vulntypes
-                if vulntype: 
-                    funccall.add_vulntrace(vulntype)
-            
+            # Evaluate all raised methodcalls when all methods have been traveld
+            if self._methods_deep[0] is method:
+                
+                # 1.We need to link all params and formal params together
+                # all traveled methods
+                for method0 in self._methods_deep:
+                    # All method calls in method
+                    for method_call1 in method0._scope.get_method_calls():
+                        # Link
+                        for par_index, param in enumerate(method_call1.params):
+                            formal_param = method_call1._method.get_formal_param(par_index)
+                            formal_param._controlled_by_user = None
+                            formal_param.is_root = False
+                            formal_param.parent = param.var
+                                               
+                # 2.Determine vulnerabilities
+                for method0 in self._methods_deep:
+                    for method_call1 in method0._scope.get_method_calls():
+                        method_scope = method_call1._method._scope
+                        for funccall in method_scope.get_functions():
+                            vulntype = funccall.vulntypes
+                            if vulntype: 
+                                funccall.add_vulntrace(vulntype)
+                        # clean formal params to avoid false positives
+                        method_call1._method.clean_formal_params()
+                        
+                # 3.Determine vulnerabilities for current method
+                for funccall in method._scope.get_functions():
+                    vulntype = funccall.vulntypes
+                    if vulntype: 
+                        funccall.add_vulntrace(vulntype)
+                
+                self._methods_deep = [] # reset method call stack
+                
             stoponthis = True
         
         # Custom function call
@@ -237,14 +292,14 @@ class PhpSCA(object):
 
             currentscope = locatescope()
             name = getattr(node, 'name', node.__class__.__name__.lower())
-            
+
             # Don't process custom functions until function call
             if name not in self._functionsDec:
                 
                 # new function call
                 newobj = FuncCall(name, node.lineno, node, currentscope)
                 self._functions.append(newobj)
-                
+
                 # Evaluate if vulnerable, if true add trace
                 vulntype = newobj.vulntypes                
                 if vulntype:
@@ -271,6 +326,10 @@ class PhpSCA(object):
             
             private $prop = 'property'
             node: ClassVariables(['private'], [ClassVariable('$prop', 'property')])
+            
+            $bla = $this->bla;
+            node: Assignment(Variable('$bla'), ObjectProperty(Variable('$this'), 'bla'), False)
+            node.node = Variable('$bla');
             '''
             
             currscope = locatescope()
@@ -284,11 +343,11 @@ class PhpSCA(object):
 
             # Create var
             newobj = VariableDef(var_name, varnode.lineno, currscope, ast_node=node.expr)
-                            
+            
             # Add var to scope
             currscope.add_var(newobj)
             
-            # If object property also add var to parent scope
+            # New object property? Also add var to parent scope (if not exist)
             if type(node.node) is phpast.ObjectProperty:
                 root_scope = currscope.get_root_scope()._parent_scope
                 if not root_scope.get_var(var_name): 
@@ -312,7 +371,7 @@ class PhpSCA(object):
                 class_node._object = True
                 class_node._object_var = newobj # pass this var to object
                 class_node.accept(self._visitor)
-                
+
             # Stop parsing children nodes
             stoponthis = True
         
@@ -343,10 +402,15 @@ class PhpSCA(object):
                 # add builtins to scope
                 newscope._builtins = dict(
                         ((uv, VariableDef(uv, -1, newscope)) for uv in VariableDef.USER_VARS))
-                
+                                
                 self._scopes.append(newscope)
                 
                 newobj = Obj(node.name, node.lineno, newscope, node._object_var, ast_node=node)
+                
+                # create $this var for internal method calling
+                this_var = VariableDef('$this', node.lineno, newscope)
+                this_var._obj_def = newobj
+                newscope.add_var(this_var)
                 
                 # add ObjDef to VarDef, this way we can trace method call back to the correct instance
                 node._object_var._obj_def = newobj            
@@ -354,24 +418,36 @@ class PhpSCA(object):
                 node._scope = newscope
                 self._objects[node._object_var.name] = node._object_var
             
-        elif nodety is phpast.Method:       
-            parentscope = locatescope()  
-            # Create new Scope and push it onto the stack
-            newscope = Scope(node, parent_scope=parentscope, is_root=True)
-            # add builtins to scope
-            newscope._builtins = dict(
-                    ((uv, VariableDef(uv, -1, newscope)) for uv in VariableDef.USER_VARS))            
-            # Don't trigger vulnerabilities in this scope untill code is no longer dead
-            newscope._dead_code = True
-            
-            self._scopes.append(newscope)
-            
-            newobj = Method(node.name, node.lineno, newscope, ast_node=node)
-            
-            node._scope = newscope
-            
-            # add this method to object
-            node._parent_node._object_var._obj_def.add_method(newobj)
+        elif nodety is phpast.Method:
+            # Methodes are not traveled untill called, this enables us to call methods from within methods
+            method = node._parent_node._object_var._obj_def.get_method(node.name)
+            if method:
+                # Method object was already created, travel the children           
+                self._scopes.append(method._scope)
+            else:
+                # Create method so we can travel childres nodes when called
+                parentscope = locatescope() 
+                # Create new Scope and push it onto the stack
+                newscope = Scope(node, parent_scope=parentscope, is_root=True)
+                # node seen
+                node._seen = True
+                # add builtins to scope
+                newscope._builtins = dict(
+                        ((uv, VariableDef(uv, -1, newscope)) for uv in VariableDef.USER_VARS))            
+                # Don't trigger vulnerabilities in this scope untill code is no longer dead
+                newscope._dead_code = True
+                
+                self._scopes.append(newscope)
+                
+                newobj = Method(node.name, node.lineno, newscope, ast_node=node)
+                
+                node._scope = newscope
+                
+                # add this method to object
+                node._parent_node._object_var._obj_def.add_method(newobj)
+                
+                # Stop parsing children nodes
+                stoponthis = True
         
         elif nodety is phpast.ClassVariables:
             '''
@@ -551,6 +627,11 @@ class VariableDef(NodeRep):
         if self._parent is None:
             self.var_node = varnode = self._get_ancestor_var(self._ast_node)
             if varnode:
+                if getattr(varnode,'_parent_node', None) and type(varnode._parent_node) is phpast.ObjectProperty and varnode.name == '$this':
+                    name = varnode.name + '->' + varnode._parent_node.name
+                    self._parent = self._scope.get_root_scope()._parent_scope.get_var(name)
+                    return self._parent
+                # all other vars vars
                 self._parent = self._scope.get_var(varnode.name)
         return self._parent
 
@@ -681,12 +762,16 @@ class Obj(NodeRep):
         self._scope = scope
         self._object_var = object_var
         self._methods = {}
+        self._scope.obj = self
         
     def add_method(self, method):
         self._methods[method.name] = method
     
     def get_method(self, name):
-        return self._methods[name]
+        return self._methods.get(name, None)
+    
+    def get_methods(self):
+        return self._methods    
 
     def __repr__(self):
         return "<Class definition '%s' at line %s>" % (self.name, self.lineno)
@@ -701,6 +786,8 @@ class Method(NodeRep):
         
         self._scope = scope
         self._formal_params = []
+        self._parsed = False
+        self._method_call = []
 
     def add_formal_param(self, var):
         self._formal_params.append(var)
@@ -709,8 +796,14 @@ class Method(NodeRep):
         return self._formal_params[index]
     
     def get_formal_params(self):
-        return self._formal_params      
-
+        return self._formal_params
+    
+    def add_method_calls(self, method):
+        self._method_calls.append(method)
+    
+    def clean_formal_params(self):
+        for param_var in self._formal_params:
+            param_var.set_clean()    
 
 class Function(NodeRep):
     def __init__(self, name, lineno, scope, ast_node=None):
@@ -891,8 +984,8 @@ class FuncCall(NodeRep):
             # get object var
             object_var = self._scope.get_var(object_name)
             method_name = self.name            
-            method_node = object_var._obj_def.get_method(method_name)
-            for param_var in method_node.get_formal_params():
+            method = object_var._obj_def.get_method(method_name)
+            for param_var in method.get_formal_params():
                 param_var.set_clean
         
         if nodeparams and type(nodeparams) is not list:
@@ -908,7 +1001,7 @@ class FuncCall(NodeRep):
             # links params to formal params
             # Methods call
             if type(ast_node) is phpast.MethodCall and param.var:
-                formal_param = method_node.get_formal_param(par_index)
+                formal_param = method.get_formal_param(par_index)
                 formal_param._controlled_by_user = None
                 formal_param.is_root = False
                 formal_param.parent = param.var
@@ -939,6 +1032,15 @@ class Scope(object):
         self._is_root = is_root
         self._dead_code = False
         self._functions = []
+        self._method_calls = []
+    
+    def add_method_call(self, method):
+        if method is None:
+            raise ValueError, "Invalid value for parameter 'Method': None"
+        self._method_calls.append(method)
+    
+    def get_method_calls(self):
+        return self._method_calls
     
     def add_function(self, function):
         if function is None:
@@ -947,8 +1049,7 @@ class Scope(object):
         
     def get_functions(self):
         return self._functions
-           
-        
+    
     def get_root_scope(self):
         while self._is_root == False:
             self = self._parent_scope
@@ -991,7 +1092,7 @@ class Scope(object):
     
     def get_var(self, varname):
         var = self._vars.get(varname, None) or self._builtins.get(varname)
-        
+
         # Don't look in parent node for var
         if self._is_root and type(self._ast_node) is not phpast.Method:
             return var

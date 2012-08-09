@@ -350,14 +350,14 @@ class TestPHPSCA(PyMockTestCase):
         # Inside var - function scope test
         self.assertEquals(0, len(echo_inside._vulntraces))
     
-    def test_classes(self):
+    def test_classes_1(self):
         code = '''
         <?php
         class A {
             private $prop1 = 'ok';
             
             function foo($var1) {
-                echo $_GET['eye'];
+                echo $_GET[1];
                 $this->prop1 = $var1;
             }
             
@@ -398,7 +398,70 @@ class TestPHPSCA(PyMockTestCase):
         
         objects = analyzer.get_objects();
         self.assertTrue('$obj1' and '$obj2' in objects)
+
+    def test_classes_2(self):
+        code = '''
+        <?php
+        class A {
         
+            function foo($var) {
+                $this->prop = $var;
+                $this->baz();
+            }
+            
+            function bar() {
+                include($this->prop);
+            }
+            
+            function baz() {
+                $this->bar();
+                echo $_GET[1];
+            }
+        }
+        
+        $obj1 = new A();
+        $obj1->foo($_GET[1]); # XSS, FILE
+        $obj1->bar('clean'); # FILE
+        
+        $obj2 = new A();
+        $obj2->bar(); # Clean
+        $obj2->baz(); # XSS
+        ?>
+        '''
+
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns()
+                            
+        self.assertEquals(2, len(vulns['XSS']))
+        self.assertEquals(2, len(vulns['FILE_INCLUDE']))
+    
+    def test_classes_3(self):
+        code = '''
+        <?php
+        
+        class A {
+        
+            function foo($var) {
+                $this->prop = $var;
+            }
+            
+            function bar() {
+                $var = 'bla' . somefunc($this->prop);
+                echo $var;
+            }
+            
+        }
+        
+        $obj1 = new A();
+        $obj1->foo($_GET[1]);
+        $obj1->bar();
+        ?>
+        '''
+        # Poperty to var test
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns() 
+        self.assertEquals(1, len(vulns['XSS']))   
+                
     def test_syntax_error(self):
         invalidcode = '''
         <?php
