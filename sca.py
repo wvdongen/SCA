@@ -247,7 +247,7 @@ class PhpSCA(object):
                     for method_call1 in method0._scope.get_method_calls():
                         method_scope = method_call1._method._scope
                         for funccall in method_scope.get_functions():
-                            vulntype = funccall.vulntypes
+                            vulntype = funccall.is_vulnerable_for()
                             if vulntype: 
                                 funccall.add_vulntrace(vulntype)
                         # clean formal params to avoid false positives
@@ -255,7 +255,7 @@ class PhpSCA(object):
                         
                 # 3.Determine vulnerabilities for current method
                 for funccall in method._scope.get_functions():
-                    vulntype = funccall.vulntypes
+                    vulntype = funccall.is_vulnerable_for()
                     if vulntype: 
                         funccall.add_vulntrace(vulntype)
                 
@@ -279,7 +279,7 @@ class PhpSCA(object):
             
             # Evaluate if vulnerable (this state will be overridden upon new function call)
             for funccall in functionObj._scope.get_functions():
-                vulntype = funccall.vulntypes
+                vulntype = funccall.is_vulnerable_for()
                 if vulntype:
                     funccall.add_vulntrace(vulntype)
             
@@ -297,13 +297,18 @@ class PhpSCA(object):
             if name not in self._functionsDec:
                 
                 # new function call
-                newobj = FuncCall(name, node.lineno, node, currentscope)
+                newobj = FuncCall(name, node.lineno, node, currentscope, self)
                 self._functions.append(newobj)
 
                 # Evaluate if vulnerable, if true add trace
-                vulntype = newobj.vulntypes                
+                vulntype = newobj.is_vulnerable_for()
                 if vulntype:
-                    newobj.add_vulntrace(vulntype)                
+                    newobj.add_vulntrace(vulntype)     
+                
+                # add vuln trace of pending trace (from param)
+                if getattr(newobj,'_pending_trace', None):
+                    newobj.add_vulntrace(trace = newobj._pending_trace)
+                    newobj._pending_trace = None
                                 
                 # add function to root scope.
                 currentscope.get_root_scope().add_function(newobj)
@@ -837,6 +842,8 @@ class FuncCall(NodeRep):
             ('include', 'require'),
         'FILE_DISCLOSURE':
             ('file_get_contents', 'file', 'fread', 'finfo_file'),
+        'SQL_INJECTION':
+            ('mysql_query', 'mysqli_query'),
         }
     # Securing Functions Database
     SFDB = {
@@ -844,44 +851,44 @@ class FuncCall(NodeRep):
             ('escapeshellarg', 'escapeshellcmd'),
         'XSS':
             ('htmlentities', 'htmlspecialchars'),
-        'SQL':
+        'SQL_INJECTION':
             ('addslashes', 'mysql_real_escape_string', 'mysqli_escape_string',
              'mysqli_real_escape_string')
         }
     
-    def __init__(self, name, lineno, ast_node, scope):
+    
+    def __init__(self, name, lineno, ast_node, scope, parent_obj = None):
         NodeRep.__init__(self, name, lineno, ast_node=ast_node)
         self._scope = scope
+        self._parent_obj = parent_obj        
         self._params = self._parse_params()
-        self._vulntypes = None
-        self._vulnsources = None
         # Funccall can be called multiple times (in custom function or method)
         self._vulntraces = []
     
     def get_vulntraces(self):
         return self._vulntraces
     
-    def add_vulntrace(self, vulntype):
-        trace = [vulntype[0]]
-        trace.append(self)
-        for p in self._params:
-            if p.var and p.var.taint_source:
-                # Add param to trace
-                var = p.var
-                trace.append('Param ' + str(p.get_index()))
-                # Add all vars to trace
-                while var.parent.taint_source:
-                    trace.append(var.parent)
-                    var = var.parent
-        self._vulntraces.append(trace)
-        
-    @property
-    def vulntypes(self):
-        self._vulntypes = []
-
-        # Defaults to no vulns.
-        self._vulntypes = vulntys = []
-        
+    def add_vulntrace(self, vulntype = None, trace = None):
+        if vulntype:
+            trace = [vulntype[0]]
+            trace.append(self)
+            for p in self._params:
+                if p.var and p.var.taint_source:
+                    # Add param to trace
+                    var = p.var
+                    trace.append(var)
+                    # Add all vars to trace
+                    while var.parent.taint_source:
+                        trace.append(var.parent)
+                        var = var.parent
+            self._vulntraces.append(trace)
+            
+        elif trace:
+            trace.insert(1, self)
+            self._vulntraces.append(trace) 
+    
+    def is_vulnerable_for(self):
+        vulntys = []
         possvulnty = FuncCall.get_vulnty_for(self.name)            
         if possvulnty:
             for v in (p.var for p in self._params if p.var):
@@ -889,21 +896,18 @@ class FuncCall(NodeRep):
                     root_scope = v._scope.get_root_scope()
                     if root_scope._dead_code == False:
                         vulntys.append(possvulnty)
-                                         
+        return vulntys
+                
+    @property
+    def vulntypes(self):
+        vulntys = []
+        map(vulntys.append, (trace[0] for trace in self.get_vulntraces()))
         return vulntys
     
     @property
     def vulnsources(self):
-        self._vulnsources = None # no cache
-        vulnsrcs = self._vulnsources
-        if type(vulnsrcs) is list:
-            return vulnsrcs
-        else:
-            vulnsrcs = self._vulnsources = []
-            # It has to be vulnerable; otherwise we got nothing to do.
-            if self.vulntypes:
-                map(vulnsrcs.append, (p.var.taint_source for p in self._params 
-                                      if p.var and p.var.taint_source))
+        vulnsrcs = []
+        map(vulnsrcs.append, (trace[-1].taint_source for trace in self.get_vulntraces()))
         return vulnsrcs
     
     @property
@@ -993,6 +997,7 @@ class FuncCall(NodeRep):
         
         # Create params
         for par_index, par in enumerate(nodeparams):
+
             # All nodes should have parents?
             par._parent_node = ast_node
             param = Param(par, self._scope, self)
@@ -1121,17 +1126,23 @@ class Param(object):
         param_index = min(i for i in range(len(self._parent_obj._params)) if self == self._parent_obj._params[i])
         return param_index
     
+    def get_root_obj(self):
+        while getattr(self, '_parent_obj', None):
+            self = self._parent_obj
+        return self
+            
+    
     def _parse_me(self, node, scope):
         '''
         Traverse this AST subtree until either a Variable or FunctionCall node
         is found...
         '''  
         vardef = None
-        
+
         for node in NodeRep.parse(node):
-            
+
             if type(node) is phpast.Variable:
-                
+
                 # object properties are stored as $this->property
                 varname = node.name
                 if type(node._parent_node) is phpast.ObjectProperty:
@@ -1149,16 +1160,36 @@ class Param(object):
                 # add var to current scope
                 scope.add_var(vardef)
                 
+                # TODO: remove this break to parse rest of param
+                # $foo = htmlspecialchars($_GET[1]) . $_GET[2]
                 break
             
             elif type(node) is phpast.FunctionCall:
+ 
                 vardef = VariableDef(node.name + '_funvar', node.lineno, scope)
-                fc = FuncCall(node.name, node.lineno, node, scope)
+
+                fc = FuncCall(node.name, node.lineno, node, scope, self)
+                
+                # Add vulntrace
+                vulntype = fc.is_vulnerable_for()              
+                if vulntype and 'FILE_DISCLOSURE' in vulntype and self._parent_obj.name in FuncCall.PVFDB['XSS']: 
+                    # Add vulntrace to parent call with pending trace
+                    fc.add_vulntrace(vulntype)
+                    self._parent_obj._pending_trace = fc.get_vulntraces()[-1]
+                    vardef._safe_for.append('XSS')
+                    vardef.set_clean()
+                
+                elif vulntype:
+                    fc.add_vulntrace(vulntype)
+                    # Keep track of thin funccal
+                    self.get_root_obj()._functions.append(fc)
+                    vardef.set_clean()
       
                 # TODO: So far we only work with the first parameter.
                 # IMPROVE THIS!!!
                 vardef.parent = fc.params and fc.params[0].var or None
-
+    
+                # Securing function?
                 vulnty = FuncCall.get_vulnty_for_sec(fc.name)
                 if vulnty:
                     vardef._safe_for.append(vulnty)

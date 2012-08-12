@@ -221,10 +221,6 @@ class TestPHPSCA(PyMockTestCase):
         analyzer = PhpSCA(code)
         syscall, echocall = analyzer.get_func_calls()
         self.assertTrue('OS_COMMANDING' in syscall.vulntypes)
-        self.assertTrue('XSS' in echocall.vulntypes)
-        #
-        # FIXME: THIS IS FAILING. NEEDS TO BE FIXED
-        #
         self.assertTrue('FILE_DISCLOSURE' in echocall.vulntypes)
     
     def test_vuln_functions_3(self):
