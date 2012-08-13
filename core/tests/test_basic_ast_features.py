@@ -21,7 +21,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 from pymock import PyMockTestCase
 from core.sca_core import PhpSCA
-from core.scope import Scope
 from core.exceptions.syntax_error import CodeSyntaxError
 
 
@@ -468,17 +467,3 @@ class TestPHPSCA(PyMockTestCase):
         '''
         self.assertRaises(CodeSyntaxError, PhpSCA, invalidcode)
 
-
-class TestScope(PyMockTestCase):
-    
-    def setUp(self):
-        PyMockTestCase.setUp(self)
-        self.scope = Scope(None, parent_scope=None)
-    
-    def test_has_builtin_container(self):
-        self.assertEquals(
-                    dict, type(getattr(self.scope, '_builtins', None)))
-    
-    def test_add_var(self):
-        self.assertRaises(ValueError, self.scope.add_var, None)
-    
