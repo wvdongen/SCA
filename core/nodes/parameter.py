@@ -52,7 +52,7 @@ class Param(object):
         for node in NodeRep.parse(node):
 
             if type(node) is phpast.Variable:
-
+                
                 # object properties are stored as $this->property
                 varname = node.name
                 if type(node._parent_node) is phpast.ObjectProperty:
@@ -70,8 +70,6 @@ class Param(object):
                 # add var to current scope
                 scope.add_var(vardef)
                 
-                # TODO: remove this break to parse rest of param
-                # $foo = htmlspecialchars($_GET[1]) . $_GET[2]
                 break
             
             elif type(node) is phpast.FunctionCall:

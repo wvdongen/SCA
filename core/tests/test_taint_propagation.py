@@ -117,4 +117,82 @@ class TestTaintPropagation(PyMockTestCase):
         self.assertEquals(['$_COOKIES'], ydeps)
         self.assertEquals(['$y', '$_COOKIES'], y2deps)
         self.assertEquals(['$x2', '$x1'], zdeps)
+
+    def test_variable_no_taint_taint(self):
+        code = '''
+        <?
+          $foo = htmlspecialchars($_GET[1]) . $_GET[2];
+        ?>
+        '''
+        analyzer = PhpSCA(code)
+        vars = analyzer.get_vars()
         
+        foo_var = vars[0]
+        self.assertTrue(foo_var.controlled_by_user)
+        self.assertTrue(foo_var.is_tainted_for('XSS'), code)
+        
+    def test_variable_taint_no_taint(self):
+        code = '''
+        <?
+          $foo = $_GET[2] . htmlspecialchars($_GET[1]);
+        ?>
+        '''
+        analyzer = PhpSCA(code)
+        vars = analyzer.get_vars()
+        
+        foo_var = vars[0]
+        self.assertTrue(foo_var.controlled_by_user)
+        self.assertTrue(foo_var.is_tainted_for('XSS'))
+
+        
+    def test_variable_taint_taint(self):
+        code = '''
+        <?
+          $foo = $_GET[2] .$_GET[1];
+        ?>
+        '''
+        analyzer = PhpSCA(code)
+        vars = analyzer.get_vars()
+        
+        foo_var = vars[0]
+        self.assertTrue(foo_var.controlled_by_user)
+        self.assertTrue(foo_var.is_tainted_for('XSS'))
+
+    def test_variable_no_taint_no_taint(self):
+        code = '''
+        <?
+          $foo = htmlspecialchars($_GET[2]) . htmlspecialchars($_GET[1]);
+        ?>
+        '''
+        analyzer = PhpSCA(code)
+        vars = analyzer.get_vars()
+        
+        foo_var = vars[0]
+        self.assertTrue(foo_var.controlled_by_user)
+        self.assertFalse(foo_var.is_tainted_for('XSS'))
+
+    def test_variable_no_taint_taint_no_taint_same(self):
+        code = '''
+        <?
+          $foo = htmlspecialchars($_GET[1]) . $_GET[1] . htmlspecialchars($_GET[1]);
+        ?>
+        '''
+        analyzer = PhpSCA(code)
+        vars = analyzer.get_vars()
+        
+        foo_var = vars[0]
+        self.assertTrue(foo_var.controlled_by_user)
+        self.assertTrue(foo_var.is_tainted_for('XSS'), code)
+
+    def test_variable_no_taint_taint_no_taint_diff(self):
+        code = '''
+        <?
+          $foo = htmlspecialchars($_GET[1]) . $_GET[2] . htmlspecialchars($_GET[3]);
+        ?>
+        '''
+        analyzer = PhpSCA(code)
+        vars = analyzer.get_vars()
+        
+        foo_var = vars[0]
+        self.assertTrue(foo_var.controlled_by_user)
+        self.assertTrue(foo_var.is_tainted_for('XSS'), code)

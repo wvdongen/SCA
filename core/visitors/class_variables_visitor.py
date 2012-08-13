@@ -21,9 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 import phply.phpast as phpast
 
 from core.visitors.base_visitor import BaseVisitor
-from core.nodes.function import Function
 from core.nodes.variable_def import VariableDef
-from core.scope import Scope
 
 
 class ClassVariablesVisitor(BaseVisitor):
