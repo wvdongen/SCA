@@ -20,8 +20,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 '''
 
 from pymock import PyMockTestCase
+from core.sca_core import PhpSCA
+from core.scope import Scope
+from core.exceptions.syntax_error import CodeSyntaxError
 
-from sca import PhpSCA, Scope, CodeSyntaxError
 
 class TestPHPSCA(PyMockTestCase):
     '''
@@ -340,7 +342,7 @@ class TestPHPSCA(PyMockTestCase):
         self.assertEquals(0, len(echo_outside._vulntraces))
         
         # Function dead - Scope is inactive (dead code), no vulnerabilities
-        self.assertTrue(analyzer.get_functionDec()['dead_code']._scope._dead_code)
+        self.assertTrue(analyzer.get_function_decl()['dead_code']._scope._dead_code)
         self.assertEquals(0, len(echo_dead_var1._vulntraces))
         
         # Inside var - function scope test

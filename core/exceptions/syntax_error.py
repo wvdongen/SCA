@@ -1,0 +1,2 @@
+class CodeSyntaxError(Exception):
+    pass
