@@ -147,7 +147,8 @@ class FuncCall(NodeRep):
         for par_index, par in enumerate(nodeparams):
 
             # All nodes should have parents?
-            par._parent_node = ast_node
+            if isinstance(par, phpast.Node):
+                par._parent_node = ast_node
             param = Param(par, self._scope, self)
             params.append(param)
             
