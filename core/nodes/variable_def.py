@@ -150,12 +150,13 @@ class VariableDef(NodeRep):
         return hash(self._name)
     
     def __repr__(self):
-        return "<Var %s definition at line %s>" % (self.name, self.lineno)
+        return "<Var %s definition at line %s in '%s'>" % (self.name, self.lineno, self.get_file_name())
     
     def __str__(self):
-        return ("Line %(lineno)s. Declaration of variable '%(name)s'."
+        return ("Line %(lineno)s in '%(file_name)s'. Declaration of variable '%(name)s'."
             " Status: %(status)s") % \
             {'name': self.name,
+             'file_name': self.get_file_name(),
              'lineno': self.lineno,
              'status': self.controlled_by_user and \
                         ("'Tainted'. Source: '%s'" % self.taint_source) or \
@@ -211,4 +212,7 @@ class VariableDef(NodeRep):
     def set_clean(self):
         self._controlled_by_user = None
         self._taint_source = None
-        self._is_root = True        
+        self._is_root = True
+    
+    def get_file_name(self):
+        return self._scope.file_name

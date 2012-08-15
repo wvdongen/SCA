@@ -96,11 +96,11 @@ class FuncCall(NodeRep):
         return class_name
         
     def __repr__(self):
-        return "<'%s' call at line %s>" % (self._name, self._lineno)
+        return "<'%s' call at line %s in '%s'>" % (self._name, self._lineno, self.get_file_name())
     
     def __str__(self):
-        return "Line %s. '%s' function call. Vulnerable%s" % \
-            (self.lineno, self.name, self.vulntypes and 
+        return "Line %s in '%s'. '%s' function call. Vulnerable%s" % \
+            (self.lineno, self.get_file_name(), self.name, self.vulntypes and 
              ' for %s.' % ','.join(self.vulntypes) or ': No.')
     
     def _parse_params(self):

@@ -27,6 +27,8 @@ from core.scope import Scope
 from core.nodes.variable_def import VariableDef
 from core.exceptions.syntax_error import CodeSyntaxError
 
+from os import path
+import sys
 
 class State(object):
     '''
@@ -36,7 +38,7 @@ class State(object):
         * Defined methods
         * Defined attributes
     '''
-    def __init__(self, code):
+    def __init__(self, code, infile):
         #
         #    Init internal variables that hold most information
         #
@@ -50,6 +52,10 @@ class State(object):
         self.objects = {}
         # used for method traveling
         self.methods_deep = []
+        # keep track of alert messages
+        self.alerts = []
+        # relative path of start script
+        self.path = ''
         
         # Lexer instance
         lexer = phplex.lexer.clone()
@@ -63,7 +69,10 @@ class State(object):
         GlobalParentNodeType = phpast.node('GlobalParentNodeType',
                                            ['name', 'children', '_parent_node'])
         ## Instantiate it and self-assign it as root node
-        self.global_pnode = GlobalParentNodeType('dummy', self.ast_code, None)
+        self.global_pnode = GlobalParentNodeType((infile or 'global_parent'), self.ast_code, None)
+        
+        if infile:
+            self.path = path.dirname(infile)
                 
         # Define scope
         scope = Scope(self.global_pnode, parent_scope=None, is_root=True)

@@ -82,7 +82,7 @@ class PhpSCA(object):
 
         # Define the initial state that contains variables, functions, classes,
         # etc. that then updated by visiting each AST node
-        self.state = State(code)
+        self.state = State(code, (infile or None))
         
         # Init all the visitors, which will be the ones responsible for analyzing
         # each AST node and changing the state 
@@ -110,6 +110,9 @@ class PhpSCA(object):
         
         # Start AST traversal!
         self.state.global_pnode.accept(self._visitor)
+        
+    def get_alerts(self):
+        return self.state.alerts        
     
     def get_function_decl(self):
         return self.state.functions_declarations

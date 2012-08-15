@@ -40,6 +40,7 @@ class Scope(object):
         self._dead_code = False
         self._functions = []
         self._method_calls = []
+        self._file_name = None
     
     def add_method_call(self, method):
         if method is None:
@@ -109,6 +110,19 @@ class Scope(object):
             var = self._parent_scope.get_var(varname)
         
         return var
+    
+    @property
+    def file_name(self):
+        if self._file_name:
+            return self._file_name
+        
+        node = self._ast_node
+        while getattr(node, '_parent_node', None):
+            if isinstance(node, phply.phpast.GlobalParentNodeType) == False:
+                node = node._parent_node
+        
+        self._file_name = node.name
+        return self._file_name    
 
     def get_all_vars(self):
         return self._vars.values()

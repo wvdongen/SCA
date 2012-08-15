@@ -50,6 +50,9 @@ class NodeRep(object):
                 yield parent
             parent = getattr(parent, '_parent_node', None)
     
+    def get_file_name(self):
+        return self._scope.file_name            
+    
     @staticmethod
     def parse(node, currlevel=0, maxlevel=MAX_LEVEL):
         yield node

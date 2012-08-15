@@ -49,10 +49,17 @@ def main():
                 
     for input_file in input_file_list:
         analyzer = PhpSCA(infile=input_file)
+        
         for vulnerability_type in analyzer.get_vulns():
             print vulnerability_type
             for vulnerability in analyzer.get_vulns()[vulnerability_type]:
                 print '    ', vulnerability
+        
+        if len(analyzer.get_alerts()) > 0:
+            print ''
+            print 'Alerts:'
+            for alert in analyzer.get_alerts():
+                print alert
 
 if __name__ == "__main__":
     err_code = main()
