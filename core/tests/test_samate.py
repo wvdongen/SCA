@@ -20,7 +20,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 '''
 import os
 from lxml import etree
-
 from pymock import PyMockTestCase
 from core.sca_core import PhpSCA
 
@@ -50,7 +49,6 @@ class TestSamate(object):
     
     def analyze_(self, test_case):
         for input_file_obj in test_case.files:
-            
             input_file_name = os.path.join(self.SAMATE_TEST_DIR, input_file_obj.file)
             analyzer = PhpSCA(infile=input_file_name)
             
@@ -63,18 +61,17 @@ class TestSamate(object):
             expected_vulns = []
             for flaw in input_file_obj.flaws:
                 sca_name = SAMATE_TO_SCA[flaw.vuln_name]
-                expected_vulns.append((sca_name, flaw.vuln_line_no))
+                expected_vulns.append((sca_name, int(flaw.vuln_line_no)))
             
             #print set(expected_vulns), set(identified_vulns)
-            #assert set(expected_vulns) == set(identified_vulns)
-            print 'EXPECTED', set(expected_vulns)
-            print 'ID', set(identified_vulns)
+            assert set(expected_vulns) == set(identified_vulns)
 
 class XMLTestCase(object):
     files = []
     
     def __init__(self, test_id):
         self.test_id = test_id
+        self.files = []
     
     def __repr__(self):
         return 'XMLTestCase for id %s' % self.test_id
@@ -84,6 +81,7 @@ class TestFile(object):
     
     def __init__(self, file_name):
         self.file = file_name
+        self.flaws = []
     
 class Flaw(object):
     def __init__(self, vuln_name, vuln_line_no):
@@ -108,7 +106,7 @@ class XMLParser:
             self.current_test_case = XMLTestCase(attrib['id'])
             self.tests.append(self.current_test_case)
             
-        if tag == 'file':
+        elif tag == 'file':
             self.current_file = TestFile(attrib['path'])
             self.current_test_case.files.append(self.current_file)
             
