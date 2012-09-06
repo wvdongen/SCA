@@ -53,6 +53,7 @@ class BaseVisitor(object):
         while True:
             currscope = state.scopes[-1]
             if node.__class__.__name__ == 'GlobalParentNodeType' or \
-                currscope._ast_node == node._parent_node:
+                currscope._ast_node == node._parent_node or \
+                currscope._ast_node == node._parent_node._parent_node:
                 return currscope
             state.scopes.pop()

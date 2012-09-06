@@ -55,8 +55,8 @@ class TestSamate(object):
             identified_vulns = []
             
             for vuln_type in analyzer.get_vulns():
-                for vuln_func_call, vuln_var in analyzer.get_vulns()[vuln_type]:
-                    identified_vulns.append((vuln_type, vuln_func_call._lineno))
+                for vuln_func_call in analyzer.get_vulns()[vuln_type]:
+                    identified_vulns.append((vuln_type, vuln_func_call[0]._lineno))
             
             expected_vulns = []
             for flaw in input_file_obj.flaws:

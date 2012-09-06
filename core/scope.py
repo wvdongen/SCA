@@ -98,16 +98,20 @@ class Scope(object):
                 matches.append(self._vars[v])
         return matches
     
-    def get_var(self, varname):
+    def get_var(self, varname, requestvar = None):
         var = self._vars.get(varname, None) or self._builtins.get(varname)
-
+        
+        # Request var is used to avoid var setting itself as parent
+        if requestvar and requestvar is var:
+            var = None
+        
         # Don't look in parent node for var
         if self._is_root and type(self._ast_node) is not phpast.Method:
             return var
         
         # look in parent parent scope
         if not var and self._parent_scope:
-            var = self._parent_scope.get_var(varname)
+            var = self._parent_scope.get_var(varname, requestvar)
         
         return var
     
@@ -118,8 +122,8 @@ class Scope(object):
         
         node = self._ast_node
         while getattr(node, '_parent_node', None):
-            if isinstance(node, phply.phpast.GlobalParentNodeType) == False:
-                node = node._parent_node
+            #if isinstance(node, phply.phpast.GlobalParentNodeType) == False:
+            node = node._parent_node
         
         self._file_name = node.name
         return self._file_name    

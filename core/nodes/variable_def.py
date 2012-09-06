@@ -90,9 +90,10 @@ class VariableDef(NodeRep):
                 and varnode.name == '$this':
                     name = varnode.name + '->' + varnode._parent_node.name
                     self._parent = self._scope.get_root_scope()._parent_scope.get_var(name)
-                    return self._parent
-                # all other vars vars
-                self._parent = self._scope.get_var(varnode.name)
+                    return self._parent 
+                # All other vars
+                # We should not set ourself as parent
+                self._parent = self._scope.get_var(varnode.name, self)
         return self._parent
 
     @parent.setter
