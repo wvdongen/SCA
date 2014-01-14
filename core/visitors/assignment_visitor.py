@@ -74,7 +74,7 @@ class AssignmentVisitor(BaseVisitor):
             if not root_scope.get_var(var_name): 
                 # create object var 
                 property = VariableDef(var_name, varnode.lineno, currscope, ast_node=node.expr)
-                property.parent = newobj
+                property.parents = [newobj]
                 root_scope.add_var(property)
 
         # Overwrite object property
@@ -83,7 +83,7 @@ class AssignmentVisitor(BaseVisitor):
             root_scope = currscope.get_root_scope()
             if type(root_scope._ast_node) is phpast.Method:
                 # link this var to property
-                root_scope._parent_scope.get_var(var_name).parent = newobj
+                root_scope._parent_scope.get_var(var_name).parents = [newobj]
         
         # Object creation
         if type(node.expr) is phpast.New and node.expr.name in state.classes:

@@ -42,35 +42,55 @@ class FuncCall(NodeRep):
         return self._vulntraces
     
     def add_vulntrace(self, vulntype = None, trace = None):
+        
+        # Recursively walk parents
+        def walk(vars, level = 0, prevlevel = 0, trace = None):
+            for i, var in enumerate(vars):
+                if var.taint_source:
+                    
+                    if i+1 < len(vars):                    
+                        copy = list(trace)
+                        copy.append(var) 
+                        walk(var.parents, level + 1, 0, copy)
+                        self._vulntraces.append(copy)
+                    else:
+                        trace.append(var) 
+                        walk(var.parents, level + 1, 0, trace)
+            if level == 0:
+                self._vulntraces.append(trace)
+        
         if vulntype:
-            trace = [vulntype[0]]
-            trace.append(self)
-            for p in self._params:
-                if p.var and p.var.taint_source:
-                    # Add param to trace
-                    var = p.var
-                    trace.append(var)
-                    # Add all vars to trace
-                    while var.parent.taint_source:
-                        trace.append(var.parent)
-                        var = var.parent
-            self._vulntraces.append(trace)
-            
+            for param in self._params:
+                for var in param.vars:
+                    if var.controlled_by_user and var.is_tainted_for(vulntype[0]):
+                        trace = [vulntype[0]]
+                        trace.append(self)        
+
+                        # Add param to trace
+                        trace.append(var)
+                        
+                        # Add all vars to trace
+                        if var.parents:
+                            walk(var.parents, 0, 0, trace)
+                            
+                        #self._vulntraces.append(trace)
+        
         elif trace:
             trace.insert(1, self)
-            self._vulntraces.append(trace) 
+            self._vulntraces.append(trace)
     
     def is_vulnerable_for(self):
         vulntys = []
-        possvulnty = get_vulnty_for(self.name)            
+        possvulnty = get_vulnty_for(self.name)
         if possvulnty:
-            for v in (p.var for p in self._params if p.var):
-                if v.controlled_by_user and v.is_tainted_for(possvulnty):
-                    root_scope = v._scope.get_root_scope()
-                    if root_scope._dead_code == False:
-                        vulntys.append(possvulnty)
+            for vars in (p.vars for p in self._params if p.vars):
+                for v in vars:
+                    if v.controlled_by_user and v.is_tainted_for(possvulnty):
+                        root_scope = v._scope.get_root_scope()
+                        if root_scope._dead_code == False:
+                            vulntys.append(possvulnty)
         return vulntys
-                
+    
     @property
     def vulntypes(self):
         vulntys = []
@@ -81,7 +101,7 @@ class FuncCall(NodeRep):
     def vulnsources(self):
         vulnsrcs = []
         map(vulnsrcs.append, (trace[-1].taint_source for trace in self.get_vulntraces()))
-        return vulnsrcs
+        return [item for sublist in vulnsrcs for item in sublist]
     
     @property
     def params(self):
@@ -154,17 +174,17 @@ class FuncCall(NodeRep):
             
             # links params to formal params
             # Methods call
-            if type(ast_node) is phpast.MethodCall and param.var:
+            if type(ast_node) is phpast.MethodCall and param.vars:
                 formal_param = method.get_formal_param(par_index)
                 formal_param._controlled_by_user = None
                 formal_param.is_root = False
-                formal_param.parent = param.var
+                formal_param.parents = param.vars
             
             # Custom function calls
-            elif type(ast_node) is phpast.FunctionCall and param.var and getattr(ast_node, '_function', None):
+            elif type(ast_node) is phpast.FunctionCall and param.vars and getattr(ast_node, '_function', None):
                 formal_param = functionObj.get_formal_param(par_index)
                 formal_param._controlled_by_user = None
                 formal_param.is_root = False
-                formal_param.parent = param.var
+                formal_param.parents = param.vars
           
         return params

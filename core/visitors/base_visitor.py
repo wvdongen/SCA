@@ -56,9 +56,9 @@ class BaseVisitor(object):
                 self._compare_nodes(currscope._ast_node, node):
                 return currscope
             state.scopes.pop()
-
+    
     def _compare_nodes(self, ast_node, node):       
         while getattr(node, '_parent_node', None):
             node = node._parent_node
             if ast_node == node:
-                return True            
+                return True

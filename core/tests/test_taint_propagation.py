@@ -55,7 +55,7 @@ class TestTaintPropagation(PyMockTestCase):
         self.assertEquals('$foo', foovar.name)
         self.assertTrue(foovar.controlled_by_user)
         self.assertFalse(foovar.is_root)
-        self.assertTrue(foovar.parent)
+        self.assertTrue(foovar.parents)
         # Test $spam
         spamvar = usr_cont_vars[1]
         self.assertEquals('$spam', spamvar.name)
@@ -116,7 +116,7 @@ class TestTaintPropagation(PyMockTestCase):
         self.assertEquals(['$x2', '$x1'], x3deps)
         self.assertEquals(['$_COOKIES'], ydeps)
         self.assertEquals(['$y', '$_COOKIES'], y2deps)
-        self.assertEquals(['$x2', '$x1'], zdeps)
+        self.assertEquals(['$x2', '$x3', '$x1'], zdeps)
 
     def test_variable_no_taint_taint(self):
         code = '''

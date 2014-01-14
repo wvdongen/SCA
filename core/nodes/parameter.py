@@ -28,9 +28,10 @@ from core.vulnerabilities.definitions import get_vulnty_for_sec, SENSITIVE_FUNCT
 class Param(object):
     
     def __init__(self, node, scope, parent_obj):
-        # Usefull to get parent function call
+        # Useful to get parent function call
         self._parent_obj = parent_obj
-        self.var = self._parse_me(node, scope)
+        self.vars = []
+        self._parse_me(node, scope)
     
     def get_index(self):
         param_index = min(i for i in range(len(self._parent_obj._params)) if self == self._parent_obj._params[i])
@@ -46,11 +47,15 @@ class Param(object):
         '''
         Traverse this AST subtree until either a Variable or FunctionCall node
         is found...
-        '''  
-        vardef = None
-
+        '''              
         for node in NodeRep.parse(node):
-
+            
+            if type(node) is phpast.BinaryOp:
+                # only parse direct nodes
+                for item in NodeRep.parse(node, 0, 0, 1): 
+                    self._parse_me(item, scope)
+                break
+            
             if type(node) is phpast.Variable:
                 
                 # object properties are stored as $this->property
@@ -59,28 +64,28 @@ class Param(object):
                     varname = node._parent_node.node.name + '->' + node._parent_node.name 
                 
                 vardef = VariableDef(varname + '__$temp_anon_var$_', node.lineno, scope)
-                vardef.var_node = node
+                vardef.var_nodes = [node]
                 # add type
                 vardef._anon_var = True
                 # get and set parent
                 scopevar = scope.get_var(varname)
-                vardef.parent = scopevar
+                vardef.add_parent(scopevar)
                 # add Param to VarDef
                 vardef._parent_obj = self
                 # add var to current scope
                 scope.add_var(vardef)
-                
+                self.vars.append(vardef)
                 break
             
             elif type(node) is phpast.FunctionCall:
- 
+                
                 vardef = VariableDef(node.name + '_funvar', node.lineno, scope)
                 from core.nodes.function_call import FuncCall
                 fc = FuncCall(node.name, node.lineno, node, scope, self)
                 
                 #TODO: Can we do this in a more extensible way? Why different ways for handling FILE_DISC / XSS?
                 # Add vulntrace
-                vulntype = fc.is_vulnerable_for()              
+                vulntype = fc.is_vulnerable_for()
                 if vulntype and 'FILE_DISCLOSURE' in vulntype and \
                 self._parent_obj.name in SENSITIVE_FUNCTIONS['XSS']: 
                     # Add vulntrace to parent call with pending trace
@@ -94,15 +99,16 @@ class Param(object):
                     # Keep track of thin funccal
                     self.get_root_obj()._functions.append(fc)
                     vardef.set_clean()
-      
-                # TODO: So far we only work with the first parameter.
-                # IMPROVE THIS!!!
-                vardef.parent = fc.params and fc.params[0].var or None
-    
+                
+                for param in fc.params:
+                    for var in param.vars:
+                        vardef.add_parent(var)
+                
                 # Securing function?
                 vulnty = get_vulnty_for_sec(fc.name)
                 if vulnty:
                     vardef._safe_for.append(vulnty)
+                
+                self.vars.append(vardef)
                 break
-
-        return vardef
+        

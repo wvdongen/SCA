@@ -48,10 +48,10 @@ class MethodCallVisitor(BaseVisitor):
         
         method = object.get_method(method_name)
         
-        # clean formal parms to avoid false positives
+        # clean formal params to avoid false positives
         method.clean_formal_params()
         
-        # keep track of the methos being traveled
+        # keep track of the methods being traveled
         state.methods_deep.append(method)
         
         # Start ast travel method Node
@@ -72,7 +72,7 @@ class MethodCallVisitor(BaseVisitor):
         method_scope = object.get_method(method_name)._scope
         method_scope._dead_code = False
         
-        # Evaluate all raised methodcalls when all methods have been traveld
+        # Evaluate all raised methodcalls when all methods have been traveled
         if state.methods_deep[0] is method:
             
             # 1.We need to link all params and formal params together
@@ -85,7 +85,7 @@ class MethodCallVisitor(BaseVisitor):
                         formal_param = method_call1._method.get_formal_param(par_index)
                         formal_param._controlled_by_user = None
                         formal_param.is_root = False
-                        formal_param.parent = param.var
+                        formal_param.parents = param.vars
                                            
             # 2.Determine vulnerabilities
             for method0 in state.methods_deep:
@@ -108,5 +108,3 @@ class MethodCallVisitor(BaseVisitor):
             state.methods_deep = []
             
         return newobj, True
-
-        

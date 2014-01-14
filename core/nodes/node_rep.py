@@ -54,8 +54,9 @@ class NodeRep(object):
         return self._scope.file_name            
     
     @staticmethod
-    def parse(node, currlevel=0, maxlevel=MAX_LEVEL):
-        yield node
+    def parse(node, currlevel=0, maxlevel=MAX_LEVEL, skipfirst=0):
+        if skipfirst == 0:
+            yield node
         if currlevel <= maxlevel:
             for f in getattr(node, 'fields', []):
                 val = getattr(node, f)
@@ -64,7 +65,7 @@ class NodeRep(object):
                 if type(val) is list:
                     for el in val:
                         el._parent_node = node
-                        for ele in NodeRep.parse(el, currlevel+1, maxlevel):
+                        for ele in NodeRep.parse(el, currlevel+1, maxlevel, 0):
                             yield ele
     
     @property

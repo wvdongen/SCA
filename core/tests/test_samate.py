@@ -37,6 +37,10 @@ class TestSamate(object):
     SAMATE_TEST_DIR = os.path.join('core','tests','samate')
     SAMATE_MANIFEST = os.path.join('core','tests','samate','manifest.xml')
     
+    # Eclipse unit test:
+#     SAMATE_TEST_DIR = os.path.join('samate')
+#     SAMATE_MANIFEST = os.path.join('samate','manifest.xml')
+    
     def _from_xml_get_test_cases(self):
         xp = XMLParser()
         parser = etree.XMLParser(target=xp)

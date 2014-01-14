@@ -41,9 +41,9 @@ class VariableDef(NodeRep):
         # Containing Scope.
         self._scope = scope
         # Parent VariableDef
-        self._parent = None
-        # AST Variable node
-        self.var_node = None
+        self._parents = []
+        # AST Variable nodes
+        self.var_nodes = []
         # Is this var controlled by user?
         self._controlled_by_user = None
         # Vulns this variable is safe for. 
@@ -64,64 +64,110 @@ class VariableDef(NodeRep):
         its ancestor's name is in USER_VARS
         '''
         if self._is_root is None:
-            if self.parent:
-                self._is_root = False
-            else:
+            if not self.parents:
                 self._is_root = True
+            else:
+                self._is_root = False
+         
         return self._is_root
-    
+     
     @is_root.setter
     def is_root(self, is_root):
         self._is_root = is_root
 
     @property
-    def parent(self):
+    def parents(self):
         '''
         Get this var's parent variable
         '''
         if self._is_root:
             return None
         
-        if self._parent is None:
-            self.var_node = varnode = self._get_ancestor_var(self._ast_node)
-            if varnode:
-                if getattr(varnode,'_parent_node', None) \
-                and type(varnode._parent_node) is phpast.ObjectProperty \
-                and varnode.name == '$this':
-                    name = varnode.name + '->' + varnode._parent_node.name
-                    self._parent = self._scope.get_root_scope()._parent_scope.get_var(name)
-                    return self._parent 
-                # All other vars
-                # We should not set ourself as parent
-                self._parent = self._scope.get_var(varnode.name, self)
-        return self._parent
-
-    @parent.setter
-    def parent(self, parent):
-        self._parent = parent
+        if not self._parents:
+            self.var_nodes = varnodes = self._get_ancestor_vars(self._ast_node)
+            if varnodes:
+                for varnode in varnodes:
+                    if getattr(varnode,'_parent_node', None) \
+                    and type(varnode._parent_node) is phpast.ObjectProperty \
+                    and varnode.name == '$this':
+                        name = varnode.name + '->' + varnode._parent_node.name
+                        parent_var = self._scope.get_root_scope()._parent_scope.get_var(name)
+                        if self != parent_var:
+                            self._parents.append(self._scope.get_root_scope()._parent_scope.get_var(name))
+                            
+                    # All other vars
+                    # We should not set ourself as parent
+                    parent_var = self._scope.get_var(varnode.name)
+                    if self != parent_var:
+                        self._parents.append(parent_var)
+        return self._parents
+    
+    @parents.setter
+    def parents(self, parents):
+        self._parents = parents
+         
+    def add_parent(self, parent):
+        self._parents.append(parent)
     
     @property
     def controlled_by_user(self):
         '''
         Returns bool that indicates if this variable is tainted.
         '''
+                
         #cbusr = self._controlled_by_user
-        cbusr = None # no cache
-        if cbusr is None:
-            if self.is_root:
-                if self._name in VariableDef.USER_VARS:
-                    cbusr = True
-                else:
-                    cbusr = False
+        #cbusr = None # no cache
+        #if cbusr is None:
+        cbusr = False #todo look at this
+        if self.is_root:
+            if self._name in VariableDef.USER_VARS:
+                cbusr = True
             else:
-                cbusr = self.parent.controlled_by_user
-            
-            self._controlled_by_user = cbusr
-
+                cbusr = False
+        else:
+            # Look at parents
+            for parent in self.parents:
+                # todo look at this hasattr
+                if hasattr(parent, 'controlled_by_user') and parent.controlled_by_user == True:
+                    cbusr = True
+        
+        #self._controlled_by_user = cbusr
+        
         return cbusr
     
     @property
     def taint_source(self):
+        '''
+        Return the taint source for this Variable Definition if any; otherwise
+        return None.
+        
+        $a = $_GET['test'];
+        $b = $a . $_GET['ok'];
+        print $b;
+        
+        $b taint source is ['test', 'ok']
+        '''
+        taintsrc = self._taint_source
+        if taintsrc:
+            return taintsrc
+        else:
+            deps = list(itertools.chain((self,), self.deps()))
+            
+            vars = []
+            for item in reversed(deps):
+                if not item.is_root:
+                    for node in item.var_nodes:
+                        vars.append(node)
+            
+            sources = []
+            for v in vars:
+                if hasattr(v, '_parent_node') and type(v._parent_node) is phpast.ArrayOffset:
+                    sources.append(v._parent_node.expr)
+            return sources
+    
+    # todo remove below when finished
+    @property
+    def taint_source_old(self):
         '''
         Return the taint source for this Variable Definition if any; otherwise
         return None.
@@ -165,8 +211,15 @@ class VariableDef(NodeRep):
             }
     
     def is_tainted_for(self, vulnty):
-        return vulnty not in self._safe_for and \
-                (self.parent.is_tainted_for(vulnty) if self.parent else True)
+        if vulnty in self._safe_for:
+            return False
+        
+        if self.parents:
+            for parent in self.parents:
+                if parent.is_tainted_for(vulnty) == False:
+                    return False
+        
+        return True
 
     def get_root_var(self):
         '''
@@ -186,34 +239,62 @@ class VariableDef(NodeRep):
         '''
         Generator function. Yields this var's dependencies.
         '''
-        parent = self.parent
-        while parent:
-            yield parent
-            parent = parent.parent
-
-    def _get_ancestor_var(self, node):
+        seen = set()
+        parents = self.parents
+        while parents:
+            for parent in parents:
+                if parent not in seen:
+                    yield parent
+                    seen.add(parent)
+                parents = parent.parents
+    
+    def _get_ancestor_vars(self, node, vars = None, level=0):
         '''
-        Return the ancestor Variable for this var.
+        Return the ancestor Variables for this var.
         For next example php code:
-            <? $a = 'ls' . $_GET['bar'];
+            <? $a = 'ls' . $_GET['bar'] . $_POST['foo'];
                $b = somefunc($a);
             ?>
-        we got that $_GET is $a's ancestor as well as $a is for $b.
+        we got that $_GET and $_POST are both $a's ancestor as well as $a is for $b.
+        
+        Also determines if this var is safe for vulns
         '''
+        if vars is None:
+            vars = []
+        
         for n in NodeRep.parse(node):
+            if type(node) is phpast.BinaryOp:
+                # only parse direct nodes
+                for item in NodeRep.parse(node, 0, 0, 1): 
+                    self._get_ancestor_vars(item, vars, level + 1)
+                break
+            
             if type(n) is phpast.Variable:
+                vars.append(n)
+
+        if level == 0:
+            safe_for = {}
+            for n in vars:
+                # todo look at all vars
                 nodetys = [phpast.FunctionCall]
                 for fc in self._get_parent_nodes(n, nodetys=nodetys):
                     vulnty = get_vulnty_for_sec(fc.name)
                     if vulnty:
-                        self._safe_for.append(vulnty)
-                return n
-        return None
+                        if vulnty not in safe_for:
+                            safe_for[vulnty] = 1
+                        else:
+                            safe_for[vulnty] = safe_for[vulnty] + 1
+            
+            for vulnty, count in safe_for.iteritems():
+                if count == len(vars):
+                    self._safe_for.append(vulnty)
+                   
+        return vars
     
     def set_clean(self):
         self._controlled_by_user = None
         self._taint_source = None
         self._is_root = True
-    
+        
     def get_file_name(self):
         return self._scope.file_name
