@@ -149,3 +149,14 @@ class TestVulnerabilities(PyMockTestCase):
         $result = mysql_query("SELECT * FROM books WHERE Author = '$q'");
         ?>'''
         self.assertTrue('SQL_INJECTION' in PhpSCA(code).get_vulns())
+        
+    def test_multiple_parents_vuln_trace(self):
+        code = '''<?php
+        $a = htmlspecialchars($_GET[1]) . $_GET[1];
+        echo $_GET[2] . $a;
+        ?>'''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertEquals(2, len(vulns['XSS']))
+        self.assertEquals(3, vulns['XSS'][0][-1].lineno)
+        self.assertEquals(2, vulns['XSS'][1][-1].lineno)
+        
