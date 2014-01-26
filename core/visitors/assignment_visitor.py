@@ -44,6 +44,9 @@ class AssignmentVisitor(BaseVisitor):
     $bla = $this->bla;
     node: Assignment(Variable('$bla'), ObjectProperty(Variable('$this'), 'bla'), False)
     node.node = Variable('$bla');
+    
+    $result = mysql_query("SELECT * FROM books WHERE Author = '$q'");
+    Assignment(Variable('$result'), FunctionCall('mysql_query', [Parameter(BinaryOp('.', BinaryOp('.', "SELECT * FROM books WHERE Author = '", Variable('$q')), "'"), False)]), False)
     '''
 
     def __init__(self, main_visitor_method):
@@ -93,6 +96,6 @@ class AssignmentVisitor(BaseVisitor):
             class_node._object_var = newobj # pass this var to object
             class_node.accept(self._main_visitor_method)
 
-        return newobj, True
+        return newobj, False
 
         

@@ -102,7 +102,7 @@ class TestVulnerabilities(PyMockTestCase):
         ?>
         '''
         analyzer = PhpSCA(code)
-        syscall1, syscall2, syscall3 = analyzer.get_func_calls()
+        escapecall, syscall1, syscall2, syscall3 = analyzer.get_func_calls()
         # Both must be SAFE!
         self.assertEquals(0, len(syscall1.vulntypes))
         self.assertEquals(0, len(syscall2.vulntypes))
@@ -141,3 +141,11 @@ class TestVulnerabilities(PyMockTestCase):
         ?>'''
         inccall = PhpSCA(code).get_func_calls()[0]
         self.assertTrue('FILE_INCLUDE' in inccall.vulntypes)
+        
+    def test_assignment_sqli(self):
+        code = '''
+        <?php
+        $q = $_POST['q'];
+        $result = mysql_query("SELECT * FROM books WHERE Author = '$q'");
+        ?>'''
+        self.assertTrue('SQL_INJECTION' in PhpSCA(code).get_vulns())
