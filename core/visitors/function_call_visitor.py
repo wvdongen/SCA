@@ -54,5 +54,3 @@ class FunctionCallVisitor(BaseVisitor):
                 funccall.add_vulntrace(vulntype)
         
         return newobj, True
-
-        

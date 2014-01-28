@@ -102,3 +102,43 @@ class TestClasses(PyMockTestCase):
         
         # Inside var - function scope test
         self.assertEquals(0, len(echo_inside._vulntraces)) 
+        
+    def test_function_return(self):
+        code = '''<?php
+        function test() {
+            $a = $_GET['a'];
+            return $a;
+        }
+        echo test();
+        '''
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns()
+        self.assertTrue('XSS' in vulns)
+        
+    def test_function_order1(self):
+        code = '''<?php
+        function a($a) {
+          return b();
+        }
+        function b() {
+          return $_GET[1];
+        }
+        echo a();
+        '''  
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns()
+        self.assertTrue('XSS' in vulns)        
+        
+    def test_function_order2(self):
+        code = '''<?php
+        function b() {
+          return $_GET[1];
+        }        
+        function a($a) {
+          return b();
+        }
+        echo a();
+        '''  
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns()
+        self.assertTrue('XSS' in vulns)     

@@ -58,6 +58,7 @@ from core.visitors.function_call_visitor import FunctionCallVisitor
 from core.visitors.function_visitor import FunctionVisitor
 from core.visitors.method_visitor import MethodVisitor
 from core.visitors.method_call_visitor import MethodCallVisitor
+from core.visitors.return_visitor import ReturnVisitor
 from core.visitors.vulnerable_func_visitor import VulnerableFuncVisitor
 
 
@@ -95,6 +96,7 @@ class PhpSCA(object):
                           FunctionVisitor(self._visitor),
                           MethodVisitor(self._visitor),
                           MethodCallVisitor(self._visitor),
+                          ReturnVisitor(self._visitor),
                           VulnerableFuncVisitor(self._visitor),
                           )
         

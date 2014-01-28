@@ -79,4 +79,8 @@ class State(object):
         scope._builtins = dict(
             ((uv, VariableDef(uv, -1, scope)) for uv in VariableDef.USER_VARS))
         
+        # Attach state to root scope, this way we can access the state in all object.
+        # TODO: There's probably a better way to do this
+        scope.state = self
+        
         self.scopes = [scope]

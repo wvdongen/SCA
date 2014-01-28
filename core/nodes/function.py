@@ -27,6 +27,7 @@ class Function(NodeRep):
         
         self._scope = scope
         self._formal_params = []
+        self._ast_node.obj = self
 
     def add_formal_param(self, var):
         self._formal_params.append(var)

@@ -106,10 +106,7 @@ class VulnerableFuncVisitor(BaseVisitor):
             
             # Travel other files if include or require
             if type(node) in (phpast.Include, phpast.Require):
-                self.parse_include_require(node, state, currentscope)            
-            
-            # Stop parsing children nodes
-            stoponthis = True
+                self.parse_include_require(node, state, currentscope)
         
         return newobj, True
 

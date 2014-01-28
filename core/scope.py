@@ -131,5 +131,11 @@ class Scope(object):
     def get_all_vars(self):
         return self._vars.values()
     
+    def get_state(self):
+        scope = self
+        while scope._parent_scope:
+            scope = scope._parent_scope
+        return scope.state
+    
     def __repr__(self):
         return "<Scope [%s]>" % ', '.join(v.name for v in self.get_all_vars())

@@ -37,6 +37,19 @@ class FuncCall(NodeRep):
         self._params = self._parse_params()
         # Funccall can be called multiple times (in custom function or method)
         self._vulntraces = []
+        
+    '''
+    funccal test() should return Function obj test
+    TODO: make clean
+    '''
+    def get_called_obj(self):
+        if type(self.ast_node) is phpast.MethodCall:
+            return None
+        
+        state = self._scope.get_state()
+        if self.name in state.functions_declarations:
+            return state.functions_declarations[self.name]
+        return None
     
     def get_vulntraces(self):
         return self._vulntraces
@@ -140,6 +153,7 @@ class FuncCall(NodeRep):
             
         params = []
         ast_node = self._ast_node
+        
         nodeparams = getattr(ast_node, attrname(ast_node), [])
 
         # Set al formal params to clean state

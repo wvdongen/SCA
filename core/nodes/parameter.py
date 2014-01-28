@@ -28,7 +28,6 @@ from core.vulnerabilities.definitions import get_vulnty_for_sec, SENSITIVE_FUNCT
 class Param(object):
     
     def __init__(self, node, scope, parent_obj):
-        # Useful to get parent function call
         self._parent_obj = parent_obj
         self.vars = []
         self._parse_me(node, scope)
@@ -45,6 +44,8 @@ class Param(object):
     
     def _parse_me(self, node, scope):
         '''
+        TODO: add method call
+        
         Traverse this AST subtree until either a Variable or FunctionCall node
         is found...
         '''              
@@ -80,6 +81,7 @@ class Param(object):
             elif type(node) is phpast.FunctionCall:
                 
                 vardef = VariableDef(node.name + '_funvar', node.lineno, scope)
+                
                 from core.nodes.function_call import FuncCall
                 fc = FuncCall(node.name, node.lineno, node, scope, self)
                 
@@ -103,7 +105,16 @@ class Param(object):
                 for param in fc.params:
                     for var in param.vars:
                         vardef.add_parent(var)
-                
+                        
+                # return values?
+                called_obj = fc.get_called_obj();
+                if called_obj:
+                    # Set function scope as active code
+                    called_obj._scope._dead_code = False
+                    if hasattr(called_obj, '_return_node'):
+                        for var in called_obj._return_node.vars:
+                            vardef.add_parent(var)
+                 
                 # Securing function?
                 vulnty = get_vulnty_for_sec(fc.name)
                 if vulnty:
