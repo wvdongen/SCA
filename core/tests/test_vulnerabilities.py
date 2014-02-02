@@ -178,3 +178,12 @@ class TestVulnerabilities(PyMockTestCase):
         self.assertEquals(3, vulns['XSS'][0][-1].lineno)
         self.assertEquals(2, vulns['XSS'][1][-1].lineno)
     
+    def test_samevar(self):
+        code = '''<?php
+        $param = $_GET[1];
+        $param = $param . 'test';
+        echo $param;
+        ?>'''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertTrue('XSS' in vulns)
+        

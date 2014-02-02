@@ -196,3 +196,11 @@ class TestTaintPropagation(PyMockTestCase):
         foo_var = vars[0]
         self.assertTrue(foo_var.controlled_by_user)
         self.assertTrue(foo_var.is_tainted_for('XSS'), code)
+    
+    def test_overwrite_user_var(self):
+        code = '''<?php
+        $_GET[1] = 'test';
+        echo $_GET[1];
+        ?>'''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertTrue('XSS' not in vulns)            
