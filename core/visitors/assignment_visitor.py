@@ -23,7 +23,6 @@ import phply.phpast as phpast
 from core.visitors.base_visitor import BaseVisitor
 from core.nodes.variable_def import VariableDef
 
-
 class AssignmentVisitor(BaseVisitor):
     '''
     Create the VariableDef
@@ -67,8 +66,8 @@ class AssignmentVisitor(BaseVisitor):
 
         # Create var
         newobj = VariableDef(var_name, varnode.lineno, currscope, ast_node=node.expr)
+        node._obj = newobj
         
-        # Add var to scope
         currscope.add_var(newobj)
         
         # New object property? Also add var to parent scope (if not exist)
@@ -79,7 +78,7 @@ class AssignmentVisitor(BaseVisitor):
                 property = VariableDef(var_name, varnode.lineno, currscope, ast_node=node.expr)
                 property.parents = [newobj]
                 root_scope.add_var(property)
-
+ 
         # Overwrite object property
         if type(node.node) is phpast.ObjectProperty:
             # link this var to object property
@@ -87,7 +86,7 @@ class AssignmentVisitor(BaseVisitor):
             if type(root_scope._ast_node) is phpast.Method:
                 # link this var to property
                 root_scope._parent_scope.get_var(var_name).parents = [newobj]
-        
+         
         # Object creation
         if type(node.expr) is phpast.New and node.expr.name in state.classes:
             # Start ast travel class Node

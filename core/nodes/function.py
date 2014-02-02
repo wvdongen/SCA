@@ -26,6 +26,8 @@ class Function(NodeRep):
         NodeRep.__init__(self, name, lineno, ast_node=ast_node)
         
         self._scope = scope
+        # return statements are stored as VariableDef
+        self._return_vars = []
         self._formal_params = []
         self._ast_node.obj = self
 

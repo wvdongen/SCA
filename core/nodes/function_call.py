@@ -32,8 +32,9 @@ class FuncCall(NodeRep):
     
     def __init__(self, name, lineno, ast_node, scope, parent_obj = None):
         NodeRep.__init__(self, name, lineno, ast_node=ast_node)
+        ast_node._obj = self
         self._scope = scope
-        self._parent_obj = parent_obj        
+        self._parent_obj = parent_obj
         self._params = self._parse_params()
         # Funccall can be called multiple times (in custom function or method)
         self._vulntraces = []

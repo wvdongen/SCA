@@ -59,7 +59,9 @@ class TestClasses(PyMockTestCase):
         analyzer = PhpSCA(code)
         
         vulns = analyzer.get_vulns()
+        self.assertTrue('XSS' in vulns)
         self.assertEquals(5, len(vulns['XSS']))
+        self.assertTrue('OS_COMMANDING' in vulns)
         self.assertEquals(1, len(vulns['OS_COMMANDING']))
         
         echo_GET, echo_var1, sys_b, echo_var3, echo_outside, echo_dead_var1, echo_inside = analyzer.get_func_calls()
@@ -115,6 +117,19 @@ class TestClasses(PyMockTestCase):
         vulns = analyzer.get_vulns()
         self.assertTrue('XSS' in vulns)
         
+    def test_function_return_multiple(self):
+        code = '''<?php
+        function a() {
+          $foo = $_GET['query'];
+          return $_GET[1] . mysql_query($foo);
+        }
+        echo a();
+        '''  
+        analyzer = PhpSCA(code)
+        vulns = analyzer.get_vulns()
+        self.assertTrue('XSS' in vulns)
+        self.assertTrue('SQL_INJECTION' in vulns)
+        
     def test_function_order1(self):
         code = '''<?php
         function a($a) {
@@ -141,4 +156,37 @@ class TestClasses(PyMockTestCase):
         '''  
         analyzer = PhpSCA(code)
         vulns = analyzer.get_vulns()
-        self.assertTrue('XSS' in vulns)     
+        self.assertTrue('XSS' in vulns)
+
+    def test_custom_funccal(self):
+        code = '''<?php
+        function a() {
+            echo $_GET[1];
+        }
+        echo a();
+        '''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertTrue('XSS' in vulns)
+        self.assertEquals(1, len(vulns['XSS']))
+        
+    def test_function_param_return(self):
+        code = '''<?php
+        function test($param) {
+          $a = somefunc($param);
+          return $a;
+        }
+        echo test($_GET[1]);
+        '''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertTrue('XSS' in vulns)
+        self.assertEquals(1, len(vulns['XSS']))
+        
+    def test_function_param_no_return(self):
+        code = '''<?php
+        function test($param) {
+          $b = somefunc($param);
+        }
+        echo test($_GET[1]);
+        '''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertEquals(0, len(vulns))

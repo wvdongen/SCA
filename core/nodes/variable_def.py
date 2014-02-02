@@ -25,7 +25,6 @@ import phply.phpast as phpast
 from core.nodes.node_rep import NodeRep
 from core.vulnerabilities.definitions import get_vulnty_for_sec
 
-
 class VariableDef(NodeRep):
     '''
     Representation for the AST Variable Definition.
@@ -42,7 +41,9 @@ class VariableDef(NodeRep):
         self._scope = scope
         # Parent VariableDef
         self._parents = []
-        # AST Variable nodes
+        # Ancestors AST FunctionCall nodes
+        self.funccall_nodes = []
+        # Ancestors AST Variable nodes
         self.var_nodes = []
         # Is this var controlled by user?
         self._controlled_by_user = None
@@ -83,7 +84,17 @@ class VariableDef(NodeRep):
         if self._is_root:
             return None
         
-        if not self._parents:
+        if not self._parents: 
+            # Function calls - add return values of functions as parents
+            self.funccall_nodes = funccall_nodes = self._get_ancestor_funccalls(self._ast_node)
+            for n in funccall_nodes:
+                if hasattr(n, '_obj'):
+                    called_obj = n._obj.get_called_obj()
+                    if called_obj:
+                        for var in called_obj._return_vars:
+                            self._parents.append(var)
+            
+            # Variables
             self.var_nodes = varnodes = self._get_ancestor_vars(self._ast_node)
             if varnodes:
                 for varnode in varnodes:
@@ -216,8 +227,9 @@ class VariableDef(NodeRep):
         
         if self.parents:
             for parent in self.parents:
-                if parent.is_tainted_for(vulnty) == False:
-                    return False
+                if parent.is_tainted_for(vulnty) == True:
+                    return True
+            return False
         
         return True
 
@@ -247,7 +259,23 @@ class VariableDef(NodeRep):
                     yield parent
                     seen.add(parent)
                 parents = parent.parents
-    
+                
+    def _get_ancestor_funccalls(self, node, funcs = None, level=0):
+        if funcs is None:
+            funcs = []
+        
+        for n in NodeRep.parse(node):
+            if type(node) is phpast.BinaryOp:
+                # only parse direct nodes
+                for item in NodeRep.parse(node, 0, 0, 1): 
+                    self._get_ancestor_funccalls(item, funcs, level + 1)
+                break
+
+            if type(n) is phpast.FunctionCall:
+                funcs.append(n)
+        
+        return funcs         
+            
     def _get_ancestor_vars(self, node, vars = None, level=0):
         '''
         Return the ancestor Variables for this var.
@@ -271,13 +299,22 @@ class VariableDef(NodeRep):
             
             if type(n) is phpast.Variable:
                 vars.append(n)
-
+        
         if level == 0:
+            
+            # Securing functions
             safe_for = {}
+            
             for n in vars:
                 # todo look at all vars
-                nodetys = [phpast.FunctionCall]
-                for fc in self._get_parent_nodes(n, nodetys=nodetys):
+                for fc in self._get_parent_nodes(n, [phpast.FunctionCall]):
+                
+                    # Don't set custom function calls params as parent, this is done by
+                    # looking at the return vars
+                    if fc in self.funccall_nodes and hasattr(fc, '_obj') and fc._obj.get_called_obj():
+                        vars.remove(n)
+                        continue
+                    
                     vulnty = get_vulnty_for_sec(fc.name)
                     if vulnty:
                         if vulnty not in safe_for:
@@ -288,7 +325,7 @@ class VariableDef(NodeRep):
             for vulnty, count in safe_for.iteritems():
                 if count == len(vars):
                     self._safe_for.append(vulnty)
-                   
+                    
         return vars
     
     def set_clean(self):

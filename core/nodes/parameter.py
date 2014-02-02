@@ -24,7 +24,6 @@ from core.nodes.node_rep import NodeRep
 from core.nodes.variable_def import VariableDef
 from core.vulnerabilities.definitions import get_vulnty_for_sec, SENSITIVE_FUNCTIONS
 
-
 class Param(object):
     
     def __init__(self, node, scope, parent_obj):
@@ -48,7 +47,7 @@ class Param(object):
         
         Traverse this AST subtree until either a Variable or FunctionCall node
         is found...
-        '''              
+        '''
         for node in NodeRep.parse(node):
             
             if type(node) is phpast.BinaryOp:
@@ -58,20 +57,20 @@ class Param(object):
                 break
             
             if type(node) is phpast.Variable:
-                
                 # object properties are stored as $this->property
                 varname = node.name
                 if type(node._parent_node) is phpast.ObjectProperty:
                     varname = node._parent_node.node.name + '->' + node._parent_node.name 
-                
+                 
                 vardef = VariableDef(varname + '__$temp_anon_var$_', node.lineno, scope)
                 vardef.var_nodes = [node]
-                # add type
+                # anon var is not stored in scope
                 vardef._anon_var = True
                 # get and set parent
                 scopevar = scope.get_var(varname)
                 vardef.add_parent(scopevar)
                 # add Param to VarDef
+                # TODO: not really necessary?
                 vardef._parent_obj = self
                 # add var to current scope
                 scope.add_var(vardef)
@@ -80,10 +79,18 @@ class Param(object):
             
             elif type(node) is phpast.FunctionCall:
                 
+                # TEST call functioncal visitor
+                from core.visitors.base_visitor import BaseVisitor
+                from core.visitors.function_call_visitor import FunctionCallVisitor
+                
+                visitor = FunctionCallVisitor(BaseVisitor);
+                fc, stoponthis = visitor.visit(node, scope.get_state())
+                
                 vardef = VariableDef(node.name + '_funvar', node.lineno, scope)
                 
-                from core.nodes.function_call import FuncCall
-                fc = FuncCall(node.name, node.lineno, node, scope, self)
+#                 from core.nodes.function_call import FuncCall
+#                 from core.nodes.function_call import FuncCall
+#                 fc = FuncCall(node.name, node.lineno, node, scope, self)
                 
                 #TODO: Can we do this in a more extensible way? Why different ways for handling FILE_DISC / XSS?
                 # Add vulntrace
@@ -95,26 +102,26 @@ class Param(object):
                     self._parent_obj._pending_trace = fc.get_vulntraces()[-1]
                     vardef._safe_for.append('XSS')
                     vardef.set_clean()
+                 
+#                 elif vulntype:
+#                     fc.add_vulntrace(vulntype)
+#                     # Keep track of thin funccal
+#                     self.get_root_obj()._functions.append(fc)
+#                     vardef.set_clean()
                 
-                elif vulntype:
-                    fc.add_vulntrace(vulntype)
-                    # Keep track of thin funccal
-                    self.get_root_obj()._functions.append(fc)
-                    vardef.set_clean()
-                
-                for param in fc.params:
-                    for var in param.vars:
-                        vardef.add_parent(var)
-                        
-                # return values?
+                # return values (custom function)?
                 called_obj = fc.get_called_obj();
                 if called_obj:
                     # Set function scope as active code
                     called_obj._scope._dead_code = False
-                    if hasattr(called_obj, '_return_node'):
-                        for var in called_obj._return_node.vars:
+                    for var in called_obj._return_vars:
+                        vardef.add_parent(var)
+#                  
+                else:
+                    for param in fc.params:
+                        for var in param.vars:
                             vardef.add_parent(var)
-                 
+                   
                 # Securing function?
                 vulnty = get_vulnty_for_sec(fc.name)
                 if vulnty:

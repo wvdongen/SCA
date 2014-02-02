@@ -36,21 +36,26 @@ class FunctionCallVisitor(BaseVisitor):
         return nodety is phpast.FunctionCall and node.name in state.functions_declarations
 
     def visit(self, node, state):
-        # Link functionCall to custom function
-        functionObj = state.functions_declarations[node.name]
+
+        # Link functionCall to custom function object
+        functionObj = state.functions_declarations[node.name] if (node.name in state.functions_declarations) else None
         node._function = functionObj
-        
+
         # Create funccall (parses the params of funccall)
         name = getattr(node, 'name', node.__class__.__name__.lower())
-        newobj = FuncCall(name, node.lineno, node, self.locate_scope(node, state))
-
-        # Set function scope as active code
-        functionObj._scope._dead_code = False
+        currscope = self.locate_scope(node, state)
+        newobj = FuncCall(name, node.lineno, node, currscope)
         
-        # Evaluate if vulnerable (this state will be overridden upon new function call)
-        for funccall in functionObj._scope.get_functions():
-            vulntype = funccall.is_vulnerable_for()
-            if vulntype:
-                funccall.add_vulntrace(vulntype)
-        
+        # Evaluate custom function
+        if functionObj:
+            
+            # Set function scope as active code
+            functionObj._scope._dead_code = False
+            
+            # Evaluate if vulnerable (this state will be overridden upon new function call)
+            for funccall in functionObj._scope.get_functions():
+                vulntype = funccall.is_vulnerable_for()
+                if vulntype:
+                    funccall.add_vulntrace(vulntype)
+                
         return newobj, True

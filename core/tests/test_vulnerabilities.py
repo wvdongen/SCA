@@ -142,7 +142,15 @@ class TestVulnerabilities(PyMockTestCase):
         inccall = PhpSCA(code).get_func_calls()[0]
         self.assertTrue('FILE_INCLUDE' in inccall.vulntypes)
         
-    def test_assignment_sqli(self):
+    def test_assignment_sqli1(self):
+        code = '''
+        <?php
+        $q = $_POST['q'];
+        $result = mysql_query("SELECT * FROM books WHERE Author = " . $q);
+        ?>'''
+        self.assertTrue('SQL_INJECTION' in PhpSCA(code).get_vulns())
+        
+    def test_assignment_sql2(self):
         code = '''
         <?php
         $q = $_POST['q'];
@@ -150,13 +158,23 @@ class TestVulnerabilities(PyMockTestCase):
         ?>'''
         self.assertTrue('SQL_INJECTION' in PhpSCA(code).get_vulns())
         
+    def test_assignment_multiple(self):
+        code = '''<?php
+        $a = $_GET[1] . mysql_query($_GET['query']);
+        echo $a;
+        ?>'''
+        vulns = PhpSCA(code).get_vulns()
+        self.assertTrue('XSS' in vulns)
+        self.assertTrue('SQL_INJECTION' in vulns)
+        
     def test_multiple_parents_vuln_trace(self):
         code = '''<?php
         $a = htmlspecialchars($_GET[1]) . $_GET[1];
         echo $_GET[2] . $a;
         ?>'''
         vulns = PhpSCA(code).get_vulns()
+        self.assertTrue('XSS' in vulns)
         self.assertEquals(2, len(vulns['XSS']))
         self.assertEquals(3, vulns['XSS'][0][-1].lineno)
         self.assertEquals(2, vulns['XSS'][1][-1].lineno)
-        
+    
